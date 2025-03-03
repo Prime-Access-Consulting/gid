@@ -16,6 +16,9 @@ python gid.py /path/to/images --config /path/to/config.json
 
 # Specify a different OpenAI model
 python gid.py /path/to/images --model gpt-4-vision-preview
+
+# Run with verbose logging (shows API requests)
+python gid.py /path/to/images --verbose
 ```
 
 ## Code Style Guidelines
@@ -25,11 +28,12 @@ python gid.py /path/to/images --model gpt-4-vision-preview
 - **Naming**: snake_case for variables/functions, CamelCase for classes
 - **Error Handling**: Use try/except with specific exceptions and meaningful error messages
 - **Concurrency**: Use ThreadPoolExecutor for parallelizable operations
-- **Type Hints**: Not currently used, but consider adding in future updates
+- **Type Hints**: Used throughout codebase with imports from typing module
 
 ## Project Structure
-- Single Python script with modular functions
+- Single Python script (`gid.py`) with modular classes and functions
 - Two operation modes:
   - Folder mode: Generates TSV with columns: OriginalFilename, ShortDescription, LongDescription, SHA1
   - Single image mode: Outputs short and long descriptions directly to console
-- Uses OpenAI API (GPT-4o) for image description generation
+- Configuration handled via config.json, environment variables, and CLI args
+- Uses OpenAI API (default: GPT-4o) for image description generation
