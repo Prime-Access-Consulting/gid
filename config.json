@@ -1,0 +1,23 @@
+{
+  "api": {
+    "api_key": "",
+    "model": "gpt-4o"
+  },
+  "parameters": {
+    "temperature": 0.7,
+    "max_tokens": 800
+  },
+  "processing": {
+    "no_copy": false,
+    "max_workers": null,
+    "verbose": false
+  },
+  "output": {
+    "output_folder_name": "Described",
+    "tsv_filename": "descriptions.tsv"
+  },
+  "prompt": {
+    "system_prompt": "You are a system generating accurate and detailed visual descriptions.\nProvided with an image, you will generate a short description of no more than 10 words and a long description which will be lengthy and detailed.\nThe short description is going to be used in a filename on Windows and Mac, so no special characters or punctuation must be used that is prohibited in filenames. Never end the short description with a period or other punctuation.\nThe long Description must contain as much accurate detailed information as possible. Do not start the description with \"an image of\" or \"photo of\" or anything like that, just dive into the description. The structure of a long visual description should be an overview sentence explaining the whole image followed by supporting sentences to add more detail. Always transcribe any and all text accurately and identify any famous figures or entities you are allowed to identify. Think through the description step by step and construct a well-formed description.\nOutput the short description first, followed by a newline, followed by the long description.",
+    "short_description_max_words": 10
+  }
+}

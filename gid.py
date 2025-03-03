@@ -1,13 +1,19 @@
 """
-This script processes images in a specified folder, generating short and long
-descriptions via the OpenAI API, storing metadata in a TSV, and optionally
-copying them into a 'Described' subfolder.
+This script processes images, generating short and long descriptions via the OpenAI API.
+It can process either a single image or a folder of images.
 
-We output four columns in the TSV:
-  1) OriginalFilename
-  2) ShortDescription
-  3) LongDescription
-  4) SHA1
+Single image mode:
+  Outputs short and long descriptions directly to standard output.
+
+Folder mode:
+  Processes images in a specified folder, storing metadata in a TSV, and optionally
+  copying them into a 'Described' subfolder.
+
+  We output four columns in the TSV:
+    1) OriginalFilename
+    2) ShortDescription
+    3) LongDescription
+    4) SHA1
 
 Features:
   - SHA-1-based checks for previously processed images
@@ -25,6 +31,8 @@ import shutil
 import hashlib
 import argparse
 import logging
+import json
+from pathlib import Path
 from typing import Tuple, Set, List, Dict, Optional, Any
 from dataclasses import dataclass
 from openai import OpenAI
@@ -44,6 +52,88 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # Valid image extensions
 VALID_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp")
+
+
+class Config:
+    """Class to handle configuration from config.json, environment variables, and CLI args."""
+    
+    DEFAULT_CONFIG = {
+        "api": {
+            "api_key": "",
+            "model": "gpt-4o"
+        },
+        "parameters": {
+            "temperature": 0.7,
+            "max_tokens": 800
+        },
+        "processing": {
+            "no_copy": False,
+            "max_workers": None,
+            "verbose": False
+        },
+        "output": {
+            "output_folder_name": "Described",
+            "tsv_filename": "descriptions.tsv"
+        },
+        "prompt": {
+            "system_prompt": """
+            You are a system generating accurate and detailed visual descriptions.
+            Provided with an image, you will generate a short description of no more than 10 words and a long description which will be lengthy and detailed.
+            The short description is going to be used in a filename on Windows and Mac, so no special characters or punctuation must be used that is prohibited in filenames. Never end the short description with a period or other punctuation.
+            The long Description must contain as much accurate detailed information as possible. Do not start the description with "an image of" or "photo of" or anything like that, just dive into the description. The structure of a long visual description should be an overview sentence explaining the whole image followed by supporting sentences to add more detail. Always transcribe any and all text accurately and identify any famous figures or entities you are allowed to identify. Think through the description step by step and construct a well-formed description.
+            Output the short description first, followed by a newline, followed by the long description.
+            """,
+            "short_description_max_words": 10
+        }
+    }
+    
+    @staticmethod
+    def find_config_file() -> Optional[str]:
+        """Find the config file in standard locations."""
+        # Check current directory first
+        if os.path.exists("config.json"):
+            return "config.json"
+        
+        # Check user config directory
+        user_config_dir = os.path.expanduser("~/.config/gid")
+        user_config_file = os.path.join(user_config_dir, "config.json")
+        if os.path.exists(user_config_file):
+            return user_config_file
+        
+        return None
+    
+    @staticmethod
+    def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+        """Load configuration from a JSON file."""
+        config = Config.DEFAULT_CONFIG.copy()
+        
+        # If no config path provided, try to find one
+        if not config_path:
+            config_path = Config.find_config_file()
+        
+        # If we found a config file, load and merge it
+        if config_path and os.path.exists(config_path):
+            try:
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    user_config = json.load(f)
+                
+                # Deep merge the user config into the default config
+                Config._merge_configs(config, user_config)
+                
+                logger.info(f"Loaded configuration from {config_path}")
+            except Exception as e:
+                logger.warning(f"Error loading config from {config_path}: {str(e)}")
+        
+        return config
+    
+    @staticmethod
+    def _merge_configs(target: Dict[str, Any], source: Dict[str, Any]) -> None:
+        """Recursively merge source config into target config."""
+        for key, value in source.items():
+            if key in target and isinstance(target[key], dict) and isinstance(value, dict):
+                Config._merge_configs(target[key], value)
+            else:
+                target[key] = value
 
 
 @dataclass
@@ -89,11 +179,11 @@ class FileHelper:
         return name.rstrip(" .")
     
     @staticmethod
-    def ensure_described_folder(folder_path: str) -> str:
+    def ensure_described_folder(folder_path: str, output_folder_name: str) -> str:
         """
-        Create a 'Described' subfolder if it does not exist.
+        Create output subfolder if it does not exist.
         """
-        described_folder_path = os.path.join(folder_path, "Described")
+        described_folder_path = os.path.join(folder_path, output_folder_name)
         if not os.path.isdir(described_folder_path):
             os.mkdir(described_folder_path)
         return described_folder_path
@@ -151,11 +241,13 @@ class TSVHandler:
 class ImageDescriber:
     """Class to interact with OpenAI API for image description."""
     
-    def __init__(self, api_key: str, temperature: float = 0.7, max_tokens: int = 800):
+    def __init__(self, api_key: str, model: str = "gpt-4o", temperature: float = 0.7, max_tokens: int = 800, system_prompt: Optional[str] = None):
         self.api_key = api_key
+        self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.client = OpenAI(api_key=api_key)
+        self.system_prompt = system_prompt or Config.DEFAULT_CONFIG["prompt"]["system_prompt"]
     
     def describe_image(self, image_path: str) -> Tuple[str, str]:
         """
@@ -167,18 +259,10 @@ class ImageDescriber:
             extension = os.path.splitext(image_path)[1][1:].lower()
             data_url = f"data:image/{extension};base64,{encoded_image}"
 
-            prompt_template = '''
-            You are a system generating accurate and detailed visual descriptions.
-            Provided with an image, you will generate a short description of no more than 10 words and a long description which will be lengthy and detailed.
-            The short description is going to be used in a filename on Windows and Mac, so no special characters or punctuation must be used that is prohibited in filenames. Never end the short description with a period or other punctuation.
-            The long Description must contain as much accurate detailed information as possible. Do not start the description with "an image of" or "photo of" or anything like that, just dive into the description. The structure of a long visual description should be an overview sentence explaining the whole image followed by supporting sentences to add more detail. Always transcribe any and all text accurately and identify any famous figures or entities you are allowed to identify. Think through the description step by step and construct a well-formed description.
-            Output the short description first, followed by a newline, followed by the long description.
-            '''
-
             response = self.client.chat.completions.create(
-                model="gpt-4o",
+                model=self.model,
                 messages=[
-                    {"role": "system", "content": prompt_template},
+                    {"role": "system", "content": self.system_prompt},
                     {
                         "role": "user",
                         "content": [
@@ -202,21 +286,33 @@ class ImageDescriber:
 class ImageProcessor:
     """Main class to orchestrate image processing."""
     
-    def __init__(self, folder_path: str, api_key: str, temperature: float = 0.7, 
-                 max_tokens: int = 800, no_copy: bool = False, max_workers: Optional[int] = None,
-                 verbose: bool = False):
+    def __init__(self, folder_path: str, config: Dict[str, Any]):
         self.folder_path = folder_path
-        self.no_copy = no_copy
-        self.max_workers = max_workers
-        self.verbose = verbose
-        self.described_folder_path = FileHelper.ensure_described_folder(folder_path)
-        self.tsv_path = os.path.join(self.described_folder_path, "descriptions.tsv")
+        self.api_key = config["api"]["api_key"]
+        self.model = config["api"]["model"]
+        self.temperature = config["parameters"]["temperature"]
+        self.max_tokens = config["parameters"]["max_tokens"]
+        self.no_copy = config["processing"]["no_copy"]
+        self.max_workers = config["processing"]["max_workers"]
+        self.verbose = config["processing"]["verbose"]
+        self.output_folder_name = config["output"]["output_folder_name"]
+        self.tsv_filename = config["output"]["tsv_filename"]
+        self.system_prompt = config["prompt"]["system_prompt"]
+        
+        self.described_folder_path = FileHelper.ensure_described_folder(folder_path, self.output_folder_name)
+        self.tsv_path = os.path.join(self.described_folder_path, self.tsv_filename)
         self.tsv_handler = TSVHandler(self.tsv_path)
-        self.describer = ImageDescriber(api_key, temperature, max_tokens)
+        self.describer = ImageDescriber(
+            api_key=self.api_key,
+            model=self.model,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+            system_prompt=self.system_prompt
+        )
         self.progress_lock = Lock()
         
         # Set up logging based on verbosity
-        if verbose:
+        if self.verbose:
             # Enable HTTP request logging in verbose mode
             logging.getLogger("openai").setLevel(logging.INFO)
             logging.getLogger("httpx").setLevel(logging.INFO)
@@ -352,42 +448,50 @@ class CLI:
     def parse_args() -> argparse.Namespace:
         """Parse command-line arguments."""
         parser = argparse.ArgumentParser(
-            description="Describe images with OpenAI. Writes 4 columns in TSV:\n"
-                        "OriginalFilename, ShortDescription, LongDescription, SHA1"
+            description="Describe images with OpenAI. For folders, writes 4 columns in TSV:\n"
+                        "OriginalFilename, ShortDescription, LongDescription, SHA1.\n"
+                        "For single image files, outputs descriptions directly."
         )
-        parser.add_argument("folder", nargs="?", help="Path to folder containing images.")
+        parser.add_argument("path", nargs="?", help="Path to folder or single image file.")
         parser.add_argument(
             "-t", "--temperature",
             type=float,
-            default=0.7,
             help="Sampling temperature for OpenAI (default=0.7)."
         )
         parser.add_argument(
             "-l", "--length",
             type=int,
-            default=800,
             help="Max tokens (default=800)."
         )
         parser.add_argument(
             "-n", "--no-copy",
             action="store_true",
-            help="If provided, do NOT copy files to 'Described' folder."
+            help="If provided, do NOT copy files to the output folder (folder mode only)."
         )
         parser.add_argument(
             "-k", "--api-key",
             type=str,
-            help="OpenAI API key (overrides environment variable)."
+            help="OpenAI API key (overrides config file and environment variable)."
         )
         parser.add_argument(
             "-w", "--workers",
             type=int,
-            default=None,
-            help="Maximum number of concurrent workers (default is auto)."
+            help="Maximum number of concurrent workers (folder mode only)."
         )
         parser.add_argument(
             "-v", "--verbose",
             action="store_true",
             help="Enable verbose output including HTTP requests."
+        )
+        parser.add_argument(
+            "-c", "--config",
+            type=str,
+            help="Path to the configuration file (default: config.json in the current directory or ~/.config/gid/config.json)"
+        )
+        parser.add_argument(
+            "-m", "--model",
+            type=str,
+            help="OpenAI model to use (default: gpt-4o)"
         )
         
         # If user didn't supply any arguments, show help and exit
@@ -398,32 +502,93 @@ class CLI:
         return parser.parse_args()
     
     @staticmethod
+    def get_config(args: argparse.Namespace) -> Dict[str, Any]:
+        """Load config from file and override with command line args."""
+        # Load config from file
+        config = Config.load_config(args.config)
+        
+        # Override with command line args
+        if args.api_key:
+            config["api"]["api_key"] = args.api_key
+        if args.model:
+            config["api"]["model"] = args.model
+        if args.temperature is not None:
+            config["parameters"]["temperature"] = args.temperature
+        if args.length is not None:
+            config["parameters"]["max_tokens"] = args.length
+        if args.no_copy:
+            config["processing"]["no_copy"] = True
+        if args.workers is not None:
+            config["processing"]["max_workers"] = args.workers
+        if args.verbose:
+            config["processing"]["verbose"] = True
+        
+        # Check for API key in environment if not in config or args
+        if not config["api"]["api_key"]:
+            config["api"]["api_key"] = os.environ.get("openai_api", "")
+        
+        return config
+    
+    @staticmethod
+    def process_single_image(image_path: str, config: Dict[str, Any]) -> None:
+        """Process a single image file and output descriptions directly."""
+        if config["processing"]["verbose"]:
+            # Enable HTTP request logging in verbose mode
+            logging.getLogger("openai").setLevel(logging.INFO)
+            logging.getLogger("httpx").setLevel(logging.INFO)
+            
+        describer = ImageDescriber(
+            api_key=config["api"]["api_key"],
+            model=config["api"]["model"],
+            temperature=config["parameters"]["temperature"],
+            max_tokens=config["parameters"]["max_tokens"],
+            system_prompt=config["prompt"]["system_prompt"]
+        )
+        
+        short_desc, long_desc = describer.describe_image(image_path)
+        
+        if short_desc == "Error":
+            print(f"Error: {long_desc}")
+            sys.exit(1)
+            
+        print(short_desc)
+        print(long_desc)
+    
+    @staticmethod
     def run() -> None:
         """Run the command-line interface."""
         args = CLI.parse_args()
         
-        # If user didn't supply the folder argument, show usage and exit
-        if not args.folder:
-            print("Error: Folder path is required.", file=sys.stderr)
+        # If user didn't supply the path argument, show usage and exit
+        if not args.path:
+            print("Error: Path to folder or image file is required.", file=sys.stderr)
             sys.exit(1)
         
-        # Get API key from args or environment
-        api_key = args.api_key if args.api_key else os.environ.get("openai_api", "")
-        if not api_key:
-            print("Error: OpenAI API key not provided. Use -k/--api-key or set openai_api environment variable.", file=sys.stderr)
+        # Get configuration
+        config = CLI.get_config(args)
+        
+        # Check for API key
+        if not config["api"]["api_key"]:
+            print("Error: OpenAI API key not provided. Use -k/--api-key, set openai_api environment variable, or add it to config.json.", file=sys.stderr)
             sys.exit(1)
         
-        processor = ImageProcessor(
-            folder_path=args.folder,
-            api_key=api_key,
-            temperature=args.temperature,
-            max_tokens=args.length,
-            no_copy=args.no_copy,
-            max_workers=args.workers,
-            verbose=args.verbose
-        )
-        
-        processor.process_all()
+        # Check if path is a directory or a file
+        if os.path.isdir(args.path):
+            # Process folder
+            processor = ImageProcessor(
+                folder_path=args.path,
+                config=config
+            )
+            processor.process_all()
+        elif os.path.isfile(args.path) and args.path.lower().endswith(VALID_EXTENSIONS):
+            # Process single image
+            CLI.process_single_image(
+                image_path=args.path,
+                config=config
+            )
+        else:
+            print(f"Error: '{args.path}' is not a valid directory or image file.", file=sys.stderr)
+            sys.exit(1)
 
 
 def main():

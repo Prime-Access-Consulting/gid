@@ -2,11 +2,20 @@
 
 ## Build/Run Commands
 ```bash
-# Run the script (replace folder_path with target directory)
+# Process a folder of images (creates TSV and optional copies)
 python gid.py /path/to/images
+
+# Process a single image (outputs descriptions to console only)
+python gid.py /path/to/image.jpg
 
 # Run with custom parameters
 python gid.py /path/to/images --temperature 0.8 --length 1000 --no-copy
+
+# Use a config file
+python gid.py /path/to/images --config /path/to/config.json
+
+# Specify a different OpenAI model
+python gid.py /path/to/images --model gpt-4-vision-preview
 ```
 
 ## Code Style Guidelines
@@ -20,5 +29,7 @@ python gid.py /path/to/images --temperature 0.8 --length 1000 --no-copy
 
 ## Project Structure
 - Single Python script with modular functions
-- Generates TSV with columns: OriginalFilename, ShortDescription, LongDescription, SHA1
+- Two operation modes:
+  - Folder mode: Generates TSV with columns: OriginalFilename, ShortDescription, LongDescription, SHA1
+  - Single image mode: Outputs short and long descriptions directly to console
 - Uses OpenAI API (GPT-4o) for image description generation
