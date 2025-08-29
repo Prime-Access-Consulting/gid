@@ -179,14 +179,27 @@ class FileHelper:
         return name.rstrip(" .")
     
     @staticmethod
-    def ensure_described_folder(folder_path: str, output_folder_name: str) -> str:
+    def ensure_described_folder(folder_path: str, output_folder_name: str, no_copy: bool = False) -> str:
         """
-        Create output subfolder if it does not exist.
+        Create output subfolder if it does not exist, unless no_copy is True.
+        
+        Args:
+            folder_path: Source folder path
+            output_folder_name: Name of output subfolder
+            no_copy: If True, return source folder directly (no subfolder created)
+        
+        Returns:
+            Path where TSV and copied files should be placed
         """
-        described_folder_path = os.path.join(folder_path, output_folder_name)
-        if not os.path.isdir(described_folder_path):
-            os.mkdir(described_folder_path)
-        return described_folder_path
+        if no_copy:
+            # When no_copy is True, use the source folder directly
+            return folder_path
+        else:
+            # Original behavior: create and return subfolder path
+            described_folder_path = os.path.join(folder_path, output_folder_name)
+            if not os.path.isdir(described_folder_path):
+                os.mkdir(described_folder_path)
+            return described_folder_path
 
 
 class TSVHandler:
@@ -299,7 +312,7 @@ class ImageProcessor:
         self.tsv_filename = config["output"]["tsv_filename"]
         self.system_prompt = config["prompt"]["system_prompt"]
         
-        self.described_folder_path = FileHelper.ensure_described_folder(folder_path, self.output_folder_name)
+        self.described_folder_path = FileHelper.ensure_described_folder(folder_path, self.output_folder_name, self.no_copy)
         self.tsv_path = os.path.join(self.described_folder_path, self.tsv_filename)
         self.tsv_handler = TSVHandler(self.tsv_path)
         self.describer = ImageDescriber(
