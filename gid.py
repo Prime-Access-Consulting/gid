@@ -211,6 +211,16 @@ class TSVHandler:
         self.known_hashes: Set[str] = set()
         self.load()
     
+    @staticmethod
+    def _escape_newlines(text: str) -> str:
+        """Escape actual newlines as \\n for TSV storage"""
+        return text.replace('\n', '\\n').replace('\r', '\\r')
+    
+    @staticmethod
+    def _unescape_newlines(text: str) -> str:
+        """Unescape \\n back to actual newlines when reading"""
+        return text.replace('\\n', '\n').replace('\\r', '\r')
+    
     def load(self) -> None:
         """
         Load existing lines (4 columns) from the TSV (skipping header).
@@ -242,7 +252,10 @@ class TSVHandler:
     
     def add_entry(self, orig_filename: str, short_desc: str, long_desc: str, file_hash: str) -> None:
         """Add an entry to the TSV file."""
-        line_to_write = f"{orig_filename}\t{short_desc}\t{long_desc}\t{file_hash}"
+        # Escape newlines in descriptions for proper TSV format
+        escaped_short = self._escape_newlines(short_desc)
+        escaped_long = self._escape_newlines(long_desc)
+        line_to_write = f"{orig_filename}\t{escaped_short}\t{escaped_long}\t{file_hash}"
         
         if line_to_write not in self.existing_lines:
             with open(self.tsv_path, "a", encoding="utf-8") as tsv_file:
@@ -538,7 +551,7 @@ class CLI:
         
         # Check for API key in environment if not in config or args
         if not config["api"]["api_key"]:
-            config["api"]["api_key"] = os.environ.get("openai_api", "")
+            config["api"]["api_key"] = os.environ.get("OPENAI_API_KEY", "")
         
         return config
     
@@ -582,7 +595,7 @@ class CLI:
         
         # Check for API key
         if not config["api"]["api_key"]:
-            print("Error: OpenAI API key not provided. Use -k/--api-key, set openai_api environment variable, or add it to config.json.", file=sys.stderr)
+            print("Error: OpenAI API key not provided. Use -k/--api-key, set OPENAI_API_KEY environment variable, or add it to config.json.", file=sys.stderr)
             sys.exit(1)
         
         # Check if path is a directory or a file
