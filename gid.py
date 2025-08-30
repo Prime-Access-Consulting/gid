@@ -60,10 +60,10 @@ class Config:
     DEFAULT_CONFIG = {
         "api": {
             "api_key": "",
-            "model": "gpt-4o"
+            "model": "gpt-5"
         },
         "parameters": {
-            "temperature": 0.7,
+            "temperature": 1,  # GPT-5 only supports 1
             "max_tokens": 800
         },
         "processing": {
@@ -285,9 +285,10 @@ class ImageDescriber:
             extension = os.path.splitext(image_path)[1][1:].lower()
             data_url = f"data:image/{extension};base64,{encoded_image}"
 
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
+            # GPT-5 API call parameters
+            completion_params = {
+                "model": self.model,
+                "messages": [
                     {"role": "system", "content": self.system_prompt},
                     {
                         "role": "user",
@@ -297,13 +298,30 @@ class ImageDescriber:
                         ]
                     }
                 ],
-                temperature=self.temperature,
-                max_tokens=self.max_tokens
-            )
-
-            text_response = response.choices[0].message.content.strip()
-            short_desc, long_desc = text_response.split("\n", 1)
-            return short_desc.strip(), long_desc.strip()
+                "max_completion_tokens": self.max_tokens,
+                "temperature": 1  # GPT-5 only supports temperature=1
+            }
+            
+            response = self.client.chat.completions.create(**completion_params)
+            
+            text_response = response.choices[0].message.content
+            if text_response is None:
+                logger.error(f"Empty response from API for {image_path}")
+                return "Error", "Empty response from API"
+            text_response = text_response.strip()
+            
+            # Parse GPT-5 response format: "SHORT: ... LONG: ..."
+            if "SHORT:" in text_response and "LONG:" in text_response:
+                parts = text_response.split("LONG:", 1)
+                short_part = parts[0].replace("SHORT:", "").strip()
+                long_part = parts[1].strip() if len(parts) > 1 else ""
+                return short_part, long_part
+            else:
+                # Fallback if format is unexpected
+                logger.warning(f"Unexpected response format for {image_path}")
+                words = text_response.split()
+                short_desc = " ".join(words[:10])
+                return short_desc, text_response
         except Exception as e:
             logger.error(f"Error describing image {image_path}: {str(e)}")
             return "Error", f"Error: {str(e)}"
