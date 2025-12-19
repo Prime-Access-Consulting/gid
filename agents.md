@@ -36,6 +36,7 @@ python gid.py /path/to/images --verbose
 - `-m`, `--model`: OpenAI model name
 - `-t`, `--temperature`: sampling temperature
 - `-l`, `--length`: max tokens (mapped to `max_output_tokens`)
+- `--init-tsv`: generate TSV with hashes and empty descriptions/context (folder mode only, no API calls)
 - `-n`, `--no-copy`: skip copying in folder mode
 - `-w`, `--workers`: max worker threads (folder mode)
 - `-v`, `--verbose`: enable OpenAI + HTTPX request logs
@@ -54,9 +55,10 @@ Note: the CLI help text lists defaults (0.7, 4000, gpt-5.2), but the actual valu
 - **Folder mode** (path is a directory):
   - Collects images with extensions: `.png .jpg .jpeg .gif .bmp .tiff .webp`
   - Sorts filenames case-insensitively, but processes results in completion order (not strict input order).
-  - Writes `descriptions.tsv` (header only if file does not exist):
-    - `OriginalFilename`, `ShortDescription`, `LongDescription`, `SHA1`
+- Writes `descriptions.tsv` (header only if file does not exist):
+    - `OriginalFilename`, `ShortDescription`, `LongDescription`, `Context`, `SHA1`
   - Uses SHA-1 hashes to skip files already present in the TSV and to skip duplicates within the same run.
+  - If `ShortDescription` or `LongDescription` is empty for a hash, it will be reprocessed to fill in descriptions.
   - Copies images into `Described/` by default; `--no-copy` keeps everything in the source folder.
   - Short description is sanitized for filename safety; collisions are resolved with `" 2"`, `" 3"`, ... up to 100.
 - **Single image mode** (path is a file):
@@ -66,6 +68,7 @@ Note: the CLI help text lists defaults (0.7, 4000, gpt-5.2), but the actual valu
 ## OpenAI Call Behavior (Important)
 - Uses the Responses API with `input_image` content and `instructions` for the system prompt.
 - Sends `temperature=<config>` and `max_output_tokens=<max_tokens>`.
+- If a row has `Context`, it is appended as additional image facts in the prompt.
 - Short descriptions are trimmed to `short_description_max_words` (default 10).
 - The prompt instructs the model to output:
   - `SHORT: ...` on line 1

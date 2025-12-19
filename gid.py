@@ -9,11 +9,12 @@ Folder mode:
   Processes images in a specified folder, storing metadata in a TSV, and optionally
   copying them into a 'Described' subfolder.
 
-  We output four columns in the TSV:
+  We output five columns in the TSV:
     1) OriginalFilename
     2) ShortDescription
     3) LongDescription
-    4) SHA1
+    4) Context
+    5) SHA1
 
 Features:
   - SHA-1-based checks for previously processed images
@@ -32,7 +33,7 @@ import hashlib
 import argparse
 import logging
 import json
-from typing import Tuple, Set, List, Dict, Optional, Any
+from typing import Tuple, List, Dict, Optional, Any
 from dataclasses import dataclass
 from openai import OpenAI
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -145,6 +146,17 @@ class ImageResult:
     file_hash: str
     short_desc: str
     long_desc: str
+    context: str
+
+
+@dataclass
+class TSVEntry:
+    """Data class to store TSV row data."""
+    original_filename: str
+    short_desc: str
+    long_desc: str
+    context: str
+    file_hash: str
 
 
 class FileHelper:
@@ -207,52 +219,109 @@ class TSVHandler:
     
     def __init__(self, tsv_path: str):
         self.tsv_path = tsv_path
-        self.known_hashes: Set[str] = set()
+        self.entries_by_hash: Dict[str, TSVEntry] = {}
+        self.hash_order: List[str] = []
+        self.has_context_column = False
         self.load()
     
     @staticmethod
     def _escape_newlines(text: str) -> str:
         """Escape actual newlines as \\n for TSV storage"""
         return text.replace('\n', '\\n').replace('\r', '\\r')
-    
+
+    @staticmethod
+    def _unescape_newlines(text: str) -> str:
+        """Unescape \\n back to actual newlines when reading"""
+        return text.replace('\\n', '\n').replace('\\r', '\r')
+
     def load(self) -> None:
         """
-        Load existing lines (4 columns) from the TSV (skipping header).
-        known_hashes -> set of SHA-1 strings from the 4th column
+        Load existing lines from the TSV (skipping header).
         """
         if not os.path.exists(self.tsv_path):
             return
         
         with open(self.tsv_path, "r", encoding="utf-8") as tsv_file:
-            # Skip header
-            next(tsv_file, None)
+            header = next(tsv_file, None)
+            if header:
+                header_cols = header.strip().split("\t")
+                self.has_context_column = "Context" in header_cols
             for line in tsv_file:
                 line = line.strip()
                 if not line:
                     continue
                 parts = line.split("\t")
-                if len(parts) == 4:
-                    hash_value = parts[3]
-                    self.known_hashes.add(hash_value)
-    
-    def write_header(self) -> None:
-        """Write TSV header if the file is new."""
-        is_new_tsv = not os.path.exists(self.tsv_path)
-        if is_new_tsv:
-            with open(self.tsv_path, "w", encoding="utf-8") as tsv_file:
-                tsv_file.write("OriginalFilename\tShortDescription\tLongDescription\tSHA1\n")
-    
-    def add_entry(self, orig_filename: str, short_desc: str, long_desc: str, file_hash: str) -> None:
-        """Add an entry to the TSV file."""
-        # Escape newlines in descriptions for proper TSV format
-        escaped_short = self._escape_newlines(short_desc)
-        escaped_long = self._escape_newlines(long_desc)
-        line_to_write = f"{orig_filename}\t{escaped_short}\t{escaped_long}\t{file_hash}"
-        
-        if file_hash not in self.known_hashes:
-            with open(self.tsv_path, "a", encoding="utf-8") as tsv_file:
-                tsv_file.write(line_to_write + "\n")
-            self.known_hashes.add(file_hash)
+                if self.has_context_column and len(parts) >= 5:
+                    orig_filename, short_desc, long_desc, context, hash_value = parts[:5]
+                elif len(parts) >= 4:
+                    orig_filename, short_desc, long_desc, hash_value = parts[:4]
+                    context = ""
+                else:
+                    continue
+                entry = TSVEntry(
+                    original_filename=orig_filename,
+                    short_desc=self._unescape_newlines(short_desc),
+                    long_desc=self._unescape_newlines(long_desc),
+                    context=self._unescape_newlines(context),
+                    file_hash=hash_value
+                )
+                if hash_value not in self.entries_by_hash:
+                    self.entries_by_hash[hash_value] = entry
+                    self.hash_order.append(hash_value)
+
+    def get_entry(self, file_hash: str) -> Optional[TSVEntry]:
+        """Get an entry by hash if it exists."""
+        return self.entries_by_hash.get(file_hash)
+
+    def upsert_entry(
+        self,
+        orig_filename: str,
+        short_desc: str,
+        long_desc: str,
+        context: str,
+        file_hash: str
+    ) -> None:
+        """Insert or update an entry keyed by file hash."""
+        entry = self.entries_by_hash.get(file_hash)
+        if entry is None:
+            self.entries_by_hash[file_hash] = TSVEntry(
+                original_filename=orig_filename,
+                short_desc=short_desc,
+                long_desc=long_desc,
+                context=context,
+                file_hash=file_hash
+            )
+            self.hash_order.append(file_hash)
+            return
+
+        if not entry.original_filename:
+            entry.original_filename = orig_filename
+        if short_desc:
+            entry.short_desc = short_desc
+        if long_desc:
+            entry.long_desc = long_desc
+        if context:
+            entry.context = context
+
+    def write_all(self) -> None:
+        """Rewrite the TSV with the current entries."""
+        with open(self.tsv_path, "w", encoding="utf-8") as tsv_file:
+            tsv_file.write("OriginalFilename\tShortDescription\tLongDescription\tContext\tSHA1\n")
+            for hash_value in self.hash_order:
+                entry = self.entries_by_hash.get(hash_value)
+                if not entry:
+                    continue
+                escaped_short = self._escape_newlines(entry.short_desc)
+                escaped_long = self._escape_newlines(entry.long_desc)
+                escaped_context = self._escape_newlines(entry.context)
+                line = (
+                    f"{entry.original_filename}\t"
+                    f"{escaped_short}\t"
+                    f"{escaped_long}\t"
+                    f"{escaped_context}\t"
+                    f"{entry.file_hash}"
+                )
+                tsv_file.write(line + "\n")
 
 
 class ImageDescriber:
@@ -285,7 +354,7 @@ class ImageDescriber:
             return short_desc
         return " ".join(words[:max_words])
     
-    def describe_image(self, image_path: str) -> Tuple[str, str]:
+    def describe_image(self, image_path: str, context: str = "") -> Tuple[str, str]:
         """
         Call the OpenAI API to generate short and long descriptions of an image.
         Returns (short_desc, long_desc).
@@ -294,6 +363,14 @@ class ImageDescriber:
             encoded_image = FileHelper.encode_image(image_path)
             extension = os.path.splitext(image_path)[1][1:].lower()
             data_url = f"data:image/{extension};base64,{encoded_image}"
+
+            instructions = self.system_prompt
+            if context.strip():
+                instructions = (
+                    f"{instructions.strip()}\n\n"
+                    "Additional image facts provided by the user (treat as true): "
+                    f"{context.strip()}"
+                )
 
             response = self.client.responses.create(
                 model=self.model,
@@ -306,7 +383,7 @@ class ImageDescriber:
                         ]
                     }
                 ],
-                instructions=self.system_prompt,
+                instructions=instructions,
                 max_output_tokens=self.max_tokens,
                 temperature=self.temperature
             )
@@ -353,7 +430,7 @@ class ImageDescriber:
 class ImageProcessor:
     """Main class to orchestrate image processing."""
     
-    def __init__(self, folder_path: str, config: Dict[str, Any]):
+    def __init__(self, folder_path: str, config: Dict[str, Any], init_only: bool = False):
         self.folder_path = folder_path
         self.api_key = config["api"]["api_key"]
         self.model = config["api"]["model"]
@@ -370,14 +447,16 @@ class ImageProcessor:
         self.described_folder_path = FileHelper.ensure_described_folder(folder_path, self.output_folder_name, self.no_copy)
         self.tsv_path = os.path.join(self.described_folder_path, self.tsv_filename)
         self.tsv_handler = TSVHandler(self.tsv_path)
-        self.describer = ImageDescriber(
-            api_key=self.api_key,
-            model=self.model,
-            temperature=self.temperature,
-            max_tokens=self.max_tokens,
-            system_prompt=self.system_prompt,
-            short_description_max_words=self.short_description_max_words
-        )
+        self.describer = None
+        if not init_only:
+            self.describer = ImageDescriber(
+                api_key=self.api_key,
+                model=self.model,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                system_prompt=self.system_prompt,
+                short_description_max_words=self.short_description_max_words
+            )
         self.progress_lock = Lock()
         
         # Set up logging based on verbosity
@@ -386,10 +465,10 @@ class ImageProcessor:
             logging.getLogger("openai").setLevel(logging.INFO)
             logging.getLogger("httpx").setLevel(logging.INFO)
     
-    def collect_image_files(self) -> List[Tuple[str, str, str]]:
+    def collect_image_files(self, include_existing: bool = False) -> List[Tuple[str, str, str, str]]:
         """
         Collect image files that need processing.
-        Returns a list of tuples: (filename, image_path, file_hash)
+        Returns a list of tuples: (filename, image_path, file_hash, context)
         """
         # Sort by name ignoring case, to mimic typical Explorer/Finder order
         all_files = sorted(os.listdir(self.folder_path), key=str.lower)
@@ -402,18 +481,25 @@ class ImageProcessor:
             if filename.lower().endswith(VALID_EXTENSIONS):
                 image_path = os.path.join(self.folder_path, filename)
                 file_hash = FileHelper.hash_file(image_path)
-                # Skip if known or queued
-                if file_hash in self.tsv_handler.known_hashes or file_hash in pending_hashes:
+                entry = self.tsv_handler.get_entry(file_hash)
+                if entry and entry.short_desc and entry.long_desc and not include_existing:
+                    continue
+                # Skip if queued
+                if file_hash in pending_hashes:
                     continue
                 pending_hashes.add(file_hash)
-                tasks.append((filename, image_path, file_hash))
+                context = entry.context if entry else ""
+                tasks.append((filename, image_path, file_hash, context))
         
         return tasks
     
-    def process_image(self, task: Tuple[str, str, str]) -> Optional[ImageResult]:
+    def process_image(self, task: Tuple[str, str, str, str]) -> Optional[ImageResult]:
         """Process a single image and return the result."""
-        filename, image_path, file_hash = task
-        short_desc, long_desc = self.describer.describe_image(image_path)
+        filename, image_path, file_hash, context = task
+        if not self.describer:
+            logger.error("Image describer is not initialized.")
+            return None
+        short_desc, long_desc = self.describer.describe_image(image_path, context)
         
         if short_desc == "Error":
             return None
@@ -423,7 +509,8 @@ class ImageProcessor:
             image_path=image_path,
             file_hash=file_hash,
             short_desc=short_desc,
-            long_desc=long_desc
+            long_desc=long_desc,
+            context=context
         )
     
     def handle_image_result(self, result: ImageResult) -> None:
@@ -468,10 +555,11 @@ class ImageProcessor:
         final_short_name = os.path.splitext(new_image_name)[0]
         
         # Add to TSV
-        self.tsv_handler.add_entry(
+        self.tsv_handler.upsert_entry(
             result.original_filename,
             final_short_name,
             result.long_desc,
+            result.context,
             result.file_hash
         )
     
@@ -485,10 +573,7 @@ class ImageProcessor:
             return
         
         logger.info(f"Processing {total_count} images...")
-        
-        # Ensure TSV header exists
-        self.tsv_handler.write_header()
-        
+
         # We'll use this to track progress
         done_count = 0
         
@@ -505,8 +590,41 @@ class ImageProcessor:
                 
                 if result:
                     self.handle_image_result(result)
-        
+
+        # Rewrite TSV with updated entries
+        self.tsv_handler.write_all()
         logger.info(f"Processed {done_count} images.")
+
+    def init_tsv(self) -> None:
+        """Initialize a TSV with hashes and empty descriptions/context."""
+        all_files = sorted(os.listdir(self.folder_path), key=str.lower)
+        pending_hashes = set()
+        self.tsv_handler.entries_by_hash.clear()
+        self.tsv_handler.hash_order.clear()
+
+        total_count = 0
+        for filename in all_files:
+            if not filename.lower().endswith(VALID_EXTENSIONS):
+                continue
+            image_path = os.path.join(self.folder_path, filename)
+            file_hash = FileHelper.hash_file(image_path)
+            if file_hash in pending_hashes:
+                continue
+            pending_hashes.add(file_hash)
+            total_count += 1
+            self.tsv_handler.upsert_entry(
+                orig_filename=filename,
+                short_desc="",
+                long_desc="",
+                context="",
+                file_hash=file_hash
+            )
+
+        if total_count == 0:
+            logger.info("No images found to initialize.")
+            return
+        self.tsv_handler.write_all()
+        logger.info(f"Initialized TSV for {total_count} images.")
 
 
 class CLI:
@@ -516,8 +634,8 @@ class CLI:
     def parse_args() -> argparse.Namespace:
         """Parse command-line arguments."""
         parser = argparse.ArgumentParser(
-            description="Describe images with OpenAI. For folders, writes 4 columns in TSV:\n"
-                        "OriginalFilename, ShortDescription, LongDescription, SHA1.\n"
+            description="Describe images with OpenAI. For folders, writes 5 columns in TSV:\n"
+                        "OriginalFilename, ShortDescription, LongDescription, Context, SHA1.\n"
                         "For single image files, outputs descriptions directly."
         )
         parser.add_argument("path", nargs="?", help="Path to folder or single image file.")
@@ -555,6 +673,11 @@ class CLI:
             "-c", "--config",
             type=str,
             help="Path to the configuration file (default: config.json in the current directory or ~/.config/gid/config.json)"
+        )
+        parser.add_argument(
+            "--init-tsv",
+            action="store_true",
+            help="Generate TSV with hashes and empty descriptions/context (folder mode only)."
         )
         parser.add_argument(
             "-m", "--model",
@@ -636,20 +759,31 @@ class CLI:
         # Get configuration
         config = CLI.get_config(args)
         
-        # Check for API key
-        if not config["api"]["api_key"]:
+        # Check for API key unless we're initializing a TSV
+        if not args.init_tsv and not config["api"]["api_key"]:
             print("Error: OpenAI API key not provided. Use -k/--api-key, set OPENAI_API_KEY environment variable, or add it to config.json.", file=sys.stderr)
             sys.exit(1)
         
         # Check if path is a directory or a file
         if os.path.isdir(args.path):
-            # Process folder
-            processor = ImageProcessor(
-                folder_path=args.path,
-                config=config
-            )
-            processor.process_all()
+            if args.init_tsv:
+                processor = ImageProcessor(
+                    folder_path=args.path,
+                    config=config,
+                    init_only=True
+                )
+                processor.init_tsv()
+            else:
+                # Process folder
+                processor = ImageProcessor(
+                    folder_path=args.path,
+                    config=config
+                )
+                processor.process_all()
         elif os.path.isfile(args.path) and args.path.lower().endswith(VALID_EXTENSIONS):
+            if args.init_tsv:
+                print("Error: --init-tsv is only supported for folder mode.", file=sys.stderr)
+                sys.exit(1)
             # Process single image
             CLI.process_single_image(
                 image_path=args.path,

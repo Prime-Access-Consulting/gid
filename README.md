@@ -105,6 +105,7 @@ options:
                         Sampling temperature for OpenAI (default=0.7).
   -l LENGTH, --length LENGTH
                         Max tokens (default=4000).
+  --init-tsv            Generate TSV with hashes and empty descriptions/context (folder mode only).
   -n, --no-copy         If provided, do NOT copy files to the output folder (folder mode only).
   -k API_KEY, --api-key API_KEY
                         OpenAI API key (overrides config file and environment variable).
@@ -199,7 +200,18 @@ The script generates a tab-separated values (TSV) file with the following column
 1. **OriginalFilename**: The original filename of the image
 2. **ShortDescription**: A short description suitable for filenames (10 words or less)
 3. **LongDescription**: A detailed description of the image content
-4. **SHA1**: A SHA-1 hash of the image file for deduplication
+4. **Context**: Optional per-image facts provided by a user to improve descriptions
+5. **SHA1**: A SHA-1 hash of the image file for deduplication
+
+### Initialize a TSV for Context
+
+To create a TSV with hashes and empty description fields (so someone can fill in Context), run:
+
+```bash
+python gid.py /path/to/images --init-tsv
+```
+
+This does not call the API or copy any files. Then add per-image context in the **Context** column and rerun the tool normally. If **ShortDescription** or **LongDescription** is empty, GID will generate descriptions for that row and append the context to the prompt as additional image facts.
 
 ### Described Folder
 
