@@ -80,8 +80,10 @@ class Config:
             You are a system generating accurate and detailed visual descriptions.
             Provided with an image, you will generate a short description of no more than 10 words and a long description which will be lengthy and detailed.
             The short description is going to be used in a filename on Windows and Mac, so no special characters or punctuation must be used that is prohibited in filenames. Never end the short description with a period or other punctuation.
-            The long Description must contain as much accurate detailed information as possible. Do not start the description with "an image of" or "photo of" or anything like that, just dive into the description. The structure of a long visual description should be an overview sentence explaining the whole image followed by supporting sentences to add more detail. Always transcribe any and all text accurately and identify any famous figures or entities you are allowed to identify. Think through the description step by step and construct a well-formed description.
-            Output the short description first, followed by a newline, followed by the long description.
+            The long description must contain as much accurate detailed information as possible. Do not start the description with "an image of" or "photo of" or anything like that, just dive into the description. The structure of a long visual description should be an overview sentence explaining the whole image followed by supporting sentences to add more detail. Always transcribe any and all text accurately and identify any famous figures or entities you are allowed to identify. Think through the description step by step and construct a well-formed description.
+            Output exactly two lines in this format:
+            SHORT: <short description>
+            LONG: <long description>
             """,
             "short_description_max_words": 10
         }
@@ -325,22 +327,35 @@ class ImageDescriber:
                 logger.error(f"Empty response from API for {image_path}")
                 return "Error", "Empty response from API"
             text_response = text_response.strip()
-            
+
             # Parse response format: "SHORT: ... LONG: ..."
-            if "SHORT:" in text_response and "LONG:" in text_response:
-                parts = text_response.split("LONG:", 1)
-                short_part = parts[0].replace("SHORT:", "").strip()
-                long_part = parts[1].strip() if len(parts) > 1 else ""
+            match = re.search(
+                r"(?is)short\\s*:\\s*(.*?)\\s*long\\s*:\\s*(.*)",
+                text_response
+            )
+            if match:
+                short_part = match.group(1).strip()
+                long_part = match.group(2).strip()
                 short_part = self._limit_short_description(short_part)
                 return short_part, long_part
-            else:
-                # Fallback if format is unexpected
-                logger.warning(f"Unexpected response format for {image_path}")
-                words = text_response.split()
-                max_words = self.short_description_max_words or 10
-                short_desc = " ".join(words[:max_words])
-                short_desc = self._limit_short_description(short_desc)
-                return short_desc, text_response
+
+            # Parse two-line format: first non-empty line is short, rest is long
+            lines = [line.strip() for line in text_response.splitlines() if line.strip()]
+            if len(lines) >= 2:
+                short_part = re.sub(r"^short( description)?\\s*:\\s*", "", lines[0], flags=re.IGNORECASE).strip()
+                long_part = "\n".join(lines[1:]).strip()
+                long_part = re.sub(r"^long( description)?\\s*:\\s*", "", long_part, flags=re.IGNORECASE).strip()
+                short_part = self._limit_short_description(short_part)
+                if long_part:
+                    return short_part, long_part
+
+            # Fallback if format is unexpected
+            logger.warning(f"Unexpected response format for {image_path}")
+            words = text_response.split()
+            max_words = self.short_description_max_words or 10
+            short_desc = " ".join(words[:max_words])
+            short_desc = self._limit_short_description(short_desc)
+            return short_desc, text_response
         except Exception as e:
             logger.error(f"Error describing image {image_path}: {str(e)}")
             return "Error", f"Error: {str(e)}"

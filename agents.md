@@ -68,10 +68,12 @@ Note: the CLI help text lists defaults (0.7, 4000, gpt-5.2), but the actual valu
 - Sends `temperature=<config>` and `max_output_tokens=<max_tokens>`.
 - Short descriptions are trimmed to `short_description_max_words` (default 10).
 - The prompt instructs the model to output:
-  - short description, newline, long description
+  - `SHORT: ...` on line 1
+  - `LONG: ...` on line 2
 - The response parser expects:
   - `SHORT: ...` and `LONG: ...`
-  - If not found, it falls back to the first N words (default 10) as the short description.
+  - If not found, it accepts a two-line format (first line short, rest long).
+  - If still not found, it falls back to the first N words (default 10) as the short description.
 
 ## Code Style Notes
 - Standard library imports first, then third-party, then local
