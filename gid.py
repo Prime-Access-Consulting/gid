@@ -60,11 +60,11 @@ class Config:
     DEFAULT_CONFIG = {
         "api": {
             "api_key": "",
-            "model": "gpt-4o"
+            "model": "gpt-5.2"
         },
         "parameters": {
             "temperature": 0.7,
-            "max_tokens": 800
+            "max_tokens": 4000
         },
         "processing": {
             "no_copy": False,
@@ -270,9 +270,9 @@ class ImageDescriber:
     def __init__(
         self,
         api_key: str,
-        model: str = "gpt-4o",
+        model: str = "gpt-5.2",
         temperature: float = 0.7,
-        max_tokens: int = 800,
+        max_tokens: int = 4000,
         system_prompt: Optional[str] = None,
         short_description_max_words: Optional[int] = None
     ):
@@ -304,26 +304,23 @@ class ImageDescriber:
             extension = os.path.splitext(image_path)[1][1:].lower()
             data_url = f"data:image/{extension};base64,{encoded_image}"
 
-            # OpenAI API call parameters
-            completion_params = {
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": self.system_prompt},
+            response = self.client.responses.create(
+                model=self.model,
+                input=[
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": "Describe the following image."},
-                            {"type": "image_url", "image_url": {"url": data_url}}
+                            {"type": "input_text", "text": "Describe the following image."},
+                            {"type": "input_image", "image_url": data_url}
                         ]
                     }
                 ],
-                "max_completion_tokens": self.max_tokens,
-                "temperature": 1  # GPT-5 only supports temperature=1
-            }
+                instructions=self.system_prompt,
+                max_output_tokens=self.max_tokens,
+                temperature=self.temperature
+            )
             
-            response = self.client.chat.completions.create(**completion_params)
-            
-            text_response = response.choices[0].message.content
+            text_response = response.output_text
             if text_response is None:
                 logger.error(f"Empty response from API for {image_path}")
                 return "Error", "Empty response from API"
@@ -529,7 +526,7 @@ class CLI:
         parser.add_argument(
             "-l", "--length",
             type=int,
-            help="Max tokens (default=800)."
+            help="Max tokens (default=4000)."
         )
         parser.add_argument(
             "-n", "--no-copy",
@@ -559,7 +556,7 @@ class CLI:
         parser.add_argument(
             "-m", "--model",
             type=str,
-            help="OpenAI model to use (default: gpt-4o)"
+            help="OpenAI model to use (default: gpt-5.2)"
         )
         
         # If user didn't supply any arguments, show help and exit

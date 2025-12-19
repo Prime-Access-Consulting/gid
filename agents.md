@@ -7,7 +7,7 @@ Generate short and long textual descriptions for images using the OpenAI API. Th
 - `gid.py`: single entry point, all logic lives here
 - `config.json`: repo default config (overrides code defaults when present)
 - `requirements.txt`: depends on `openai>=1.0.0`
-- `README.md`: user-facing docs (some values are out of sync with code; see notes below)
+- `README.md`: user-facing docs
 
 ## Run Commands
 ```bash
@@ -24,7 +24,7 @@ python gid.py /path/to/images --temperature 0.8 --length 1000 --no-copy
 python gid.py /path/to/images --config /path/to/config.json
 
 # Select a different model
-python gid.py /path/to/images --model gpt-4o
+python gid.py /path/to/images --model gpt-5.2
 
 # Verbose logging (OpenAI + HTTPX request logs)
 python gid.py /path/to/images --verbose
@@ -34,21 +34,21 @@ python gid.py /path/to/images --verbose
 - `path` (positional): folder or image file path
 - `-k`, `--api-key`: OpenAI API key
 - `-m`, `--model`: OpenAI model name
-- `-t`, `--temperature`: sampling temperature (currently ignored in API call)
-- `-l`, `--length`: max tokens (mapped to `max_completion_tokens`)
+- `-t`, `--temperature`: sampling temperature
+- `-l`, `--length`: max tokens (mapped to `max_output_tokens`)
 - `-n`, `--no-copy`: skip copying in folder mode
 - `-w`, `--workers`: max worker threads (folder mode)
 - `-v`, `--verbose`: enable OpenAI + HTTPX request logs
 - `-c`, `--config`: path to config file
 
 ## Configuration Resolution
-1. Start from `Config.DEFAULT_CONFIG` in `gid.py` (model `gpt-4o`, temperature `0.7`, max tokens `800`).
+1. Start from `Config.DEFAULT_CONFIG` in `gid.py` (model `gpt-5.2`, temperature `0.7`, max tokens `4000`).
 2. If a config file exists, deep-merge it:
    - `config.json` in the current directory, else `~/.config/gid/config.json`
    - The repo includes `config.json`, which currently matches the defaults but still overrides.
 3. CLI flags override config values.
 4. `OPENAI_API_KEY` is used only if no API key was provided by file or CLI.
-Note: the CLI help text lists defaults (0.7, 800, gpt-4o), but the actual values come from the config resolution above.
+Note: the CLI help text lists defaults (0.7, 4000, gpt-5.2), but the actual values come from the config resolution above.
 
 ## Modes and Output
 - **Folder mode** (path is a directory):
@@ -64,15 +64,14 @@ Note: the CLI help text lists defaults (0.7, 800, gpt-4o), but the actual values
   - No files are created.
 
 ## OpenAI Call Behavior (Important)
-- The API request always sends `temperature=1` and `max_completion_tokens=<max_tokens>`.
-  - The `--temperature` flag and `config["parameters"]["temperature"]` are currently ignored.
+- Uses the Responses API with `input_image` content and `instructions` for the system prompt.
+- Sends `temperature=<config>` and `max_output_tokens=<max_tokens>`.
 - Short descriptions are trimmed to `short_description_max_words` (default 10).
 - The prompt instructs the model to output:
   - short description, newline, long description
 - The response parser expects:
   - `SHORT: ...` and `LONG: ...`
-  - If not found, it falls back to the first 10 words as the short description.
-- `short_description_max_words` exists in config but is not enforced in code.
+  - If not found, it falls back to the first N words (default 10) as the short description.
 
 ## Code Style Notes
 - Standard library imports first, then third-party, then local

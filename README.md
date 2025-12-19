@@ -1,6 +1,6 @@
 # GID - Generate Image Descriptions
 
-GID is a Python tool for automatically generating human-readable descriptions of images using OpenAI's GPT-4o Vision model. It processes image files in a specified folder, creates both short and detailed descriptions, and optionally renames and copies the files based on their descriptions.
+GID is a Python tool for automatically generating human-readable descriptions of images using OpenAI's GPT-5.2 model. It processes image files in a specified folder, creates both short and detailed descriptions, and optionally renames and copies the files based on their descriptions.
 
 ## Features
 
@@ -21,7 +21,7 @@ GID is a Python tool for automatically generating human-readable descriptions of
 ### Prerequisites
 
 - Python 3.7+
-- OpenAI API key with access to GPT-4o Vision model
+- OpenAI API key with access to GPT-5.2
 
 ### Setup
 
@@ -104,7 +104,7 @@ options:
   -t TEMPERATURE, --temperature TEMPERATURE
                         Sampling temperature for OpenAI (default=0.7).
   -l LENGTH, --length LENGTH
-                        Max tokens (default=800).
+                        Max tokens (default=4000).
   -n, --no-copy         If provided, do NOT copy files to the output folder (folder mode only).
   -k API_KEY, --api-key API_KEY
                         OpenAI API key (overrides config file and environment variable).
@@ -114,7 +114,7 @@ options:
   -c CONFIG, --config CONFIG
                         Path to the configuration file (default: config.json in the current directory or ~/.config/gid/config.json)
   -m MODEL, --model MODEL
-                        OpenAI model to use (default: gpt-4o)
+                        OpenAI model to use (default: gpt-5.2)
 ```
 
 ### Examples
@@ -167,11 +167,11 @@ The configuration file supports the following settings:
 {
   "api": {
     "api_key": "",         // Your OpenAI API key
-    "model": "gpt-4o"      // OpenAI model to use
+    "model": "gpt-5.2"     // OpenAI model to use
   },
   "parameters": {
     "temperature": 0.7,    // Sampling temperature
-    "max_tokens": 800      // Maximum response tokens
+    "max_tokens": 4000     // Maximum response tokens
   },
   "processing": {
     "no_copy": false,      // Whether to skip copying files
@@ -217,4 +217,4 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## Acknowledgments
 
-This tool uses OpenAI's GPT-4o Vision model to generate image descriptions.
+This tool uses OpenAI's GPT-5.2 model to generate image descriptions.
