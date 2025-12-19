@@ -32,7 +32,6 @@ import hashlib
 import argparse
 import logging
 import json
-from pathlib import Path
 from typing import Tuple, Set, List, Dict, Optional, Any
 from dataclasses import dataclass
 from openai import OpenAI
@@ -141,7 +140,6 @@ class Config:
 @dataclass
 class ImageResult:
     """Data class to store image processing results."""
-    idx: int
     original_filename: str
     image_path: str
     file_hash: str
@@ -217,11 +215,6 @@ class TSVHandler:
     def _escape_newlines(text: str) -> str:
         """Escape actual newlines as \\n for TSV storage"""
         return text.replace('\n', '\\n').replace('\r', '\\r')
-    
-    @staticmethod
-    def _unescape_newlines(text: str) -> str:
-        """Unescape \\n back to actual newlines when reading"""
-        return text.replace('\\n', '\n').replace('\\r', '\r')
     
     def load(self) -> None:
         """
@@ -397,10 +390,10 @@ class ImageProcessor:
             logging.getLogger("openai").setLevel(logging.INFO)
             logging.getLogger("httpx").setLevel(logging.INFO)
     
-    def collect_image_files(self) -> List[Tuple[int, str, str, str]]:
+    def collect_image_files(self) -> List[Tuple[str, str, str]]:
         """
         Collect image files that need processing.
-        Returns a list of tuples: (idx, filename, image_path, file_hash)
+        Returns a list of tuples: (filename, image_path, file_hash)
         """
         # Sort by name ignoring case, to mimic typical Explorer/Finder order
         all_files = sorted(os.listdir(self.folder_path), key=str.lower)
@@ -409,7 +402,7 @@ class ImageProcessor:
         pending_hashes = set()
         
         # Identify which files need describing, preserving sorted order
-        for idx, filename in enumerate(all_files):
+        for filename in all_files:
             if filename.lower().endswith(VALID_EXTENSIONS):
                 image_path = os.path.join(self.folder_path, filename)
                 file_hash = FileHelper.hash_file(image_path)
@@ -417,20 +410,19 @@ class ImageProcessor:
                 if file_hash in self.tsv_handler.known_hashes or file_hash in pending_hashes:
                     continue
                 pending_hashes.add(file_hash)
-                tasks.append((idx, filename, image_path, file_hash))
+                tasks.append((filename, image_path, file_hash))
         
         return tasks
     
-    def process_image(self, task: Tuple[int, str, str, str]) -> Optional[ImageResult]:
+    def process_image(self, task: Tuple[str, str, str]) -> Optional[ImageResult]:
         """Process a single image and return the result."""
-        idx, filename, image_path, file_hash = task
+        filename, image_path, file_hash = task
         short_desc, long_desc = self.describer.describe_image(image_path)
         
         if short_desc == "Error":
             return None
         
         return ImageResult(
-            idx=idx,
             original_filename=filename,
             image_path=image_path,
             file_hash=file_hash,
