@@ -727,13 +727,27 @@ class ImageProcessor:
         composite_tasks, skip_filenames = self.collect_composite_tasks()
         tasks = self.collect_image_files(skip_filenames=skip_filenames)
         total_count = len(tasks) + len(composite_tasks)
+        composite_count = len(composite_tasks)
+        single_image_count = len(tasks)
+        composite_image_count = sum(len(files) for _entry, files, _hash in composite_tasks)
+        total_images = single_image_count + composite_image_count
+        progress_label = "rows" if composite_count else "images"
         
         if total_count == 0:
             self.tsv_handler.write_all()
             logger.info("No new images to process.")
             return
         
-        logger.info(f"Processing {total_count} images...")
+        if composite_count:
+            logger.info(
+                "Processing "
+                f"{total_count} rows "
+                f"({single_image_count} single images, "
+                f"{composite_count} composite rows, "
+                f"{total_images} images total)..."
+            )
+        else:
+            logger.info(f"Processing {total_count} images...")
 
         # We'll use this to track progress
         done_count = 0
@@ -751,7 +765,7 @@ class ImageProcessor:
                 
                 with self.progress_lock:
                     done_count += 1
-                    logger.info(f"{done_count} of {total_count}")
+                    logger.info(f"{done_count} of {total_count} {progress_label}")
                 
                 if result:
                     kind = future_to_kind[future]
@@ -762,7 +776,7 @@ class ImageProcessor:
         
         # Rewrite TSV with updated entries
         self.tsv_handler.write_all()
-        logger.info(f"Processed {done_count} images.")
+        logger.info(f"Processed {done_count} {progress_label}.")
 
     def init_tsv(self) -> None:
         """Initialize a TSV with hashes and empty descriptions/context."""
