@@ -731,7 +731,10 @@ class ImageProcessor:
         single_image_count = len(tasks)
         composite_image_count = sum(len(files) for _entry, files, _hash in composite_tasks)
         total_images = single_image_count + composite_image_count
-        progress_label = "rows" if composite_count else "images"
+        def _label(count: int, singular: str) -> str:
+            return singular if count == 1 else f"{singular}s"
+
+        row_label = _label(total_count, "row") if composite_count else _label(total_count, "image")
         
         if total_count == 0:
             self.tsv_handler.write_all()
@@ -741,13 +744,13 @@ class ImageProcessor:
         if composite_count:
             logger.info(
                 "Processing "
-                f"{total_count} rows "
-                f"({single_image_count} single images, "
-                f"{composite_count} composite rows, "
-                f"{total_images} images total)..."
+                f"{total_count} {row_label} "
+                f"({single_image_count} {_label(single_image_count, 'single image')}, "
+                f"{composite_count} {_label(composite_count, 'composite row')}, "
+                f"{total_images} {_label(total_images, 'image')} total)..."
             )
         else:
-            logger.info(f"Processing {total_count} images...")
+            logger.info(f"Processing {total_count} {row_label}...")
 
         # We'll use this to track progress
         done_count = 0
@@ -765,7 +768,7 @@ class ImageProcessor:
                 
                 with self.progress_lock:
                     done_count += 1
-                    logger.info(f"{done_count} of {total_count} {progress_label}")
+                    logger.info(f"{done_count} of {total_count} {row_label}")
                 
                 if result:
                     kind = future_to_kind[future]
@@ -776,7 +779,7 @@ class ImageProcessor:
         
         # Rewrite TSV with updated entries
         self.tsv_handler.write_all()
-        logger.info(f"Processed {done_count} {progress_label}.")
+        logger.info(f"Processed {done_count} {row_label}.")
 
     def init_tsv(self) -> None:
         """Initialize a TSV with hashes and empty descriptions/context."""
