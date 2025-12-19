@@ -59,3 +59,7 @@ venv.bak/
 
 # Windows specific
 Thumbs.db
+
+# Local image fixtures
+images/
+temp/

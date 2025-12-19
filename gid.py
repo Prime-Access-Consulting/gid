@@ -60,10 +60,10 @@ class Config:
     DEFAULT_CONFIG = {
         "api": {
             "api_key": "",
-            "model": "gpt-5"
+            "model": "gpt-4o"
         },
         "parameters": {
-            "temperature": 1,  # GPT-5 only supports 1
+            "temperature": 0.7,
             "max_tokens": 800
         },
         "processing": {
@@ -267,13 +267,32 @@ class TSVHandler:
 class ImageDescriber:
     """Class to interact with OpenAI API for image description."""
     
-    def __init__(self, api_key: str, model: str = "gpt-4o", temperature: float = 0.7, max_tokens: int = 800, system_prompt: Optional[str] = None):
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "gpt-4o",
+        temperature: float = 0.7,
+        max_tokens: int = 800,
+        system_prompt: Optional[str] = None,
+        short_description_max_words: Optional[int] = None
+    ):
         self.api_key = api_key
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.client = OpenAI(api_key=api_key)
         self.system_prompt = system_prompt or Config.DEFAULT_CONFIG["prompt"]["system_prompt"]
+        self.short_description_max_words = short_description_max_words
+    
+    def _limit_short_description(self, short_desc: str) -> str:
+        """Trim short description to the configured max word count."""
+        max_words = self.short_description_max_words
+        if not max_words or max_words <= 0:
+            return short_desc
+        words = short_desc.split()
+        if len(words) <= max_words:
+            return short_desc
+        return " ".join(words[:max_words])
     
     def describe_image(self, image_path: str) -> Tuple[str, str]:
         """
@@ -285,7 +304,7 @@ class ImageDescriber:
             extension = os.path.splitext(image_path)[1][1:].lower()
             data_url = f"data:image/{extension};base64,{encoded_image}"
 
-            # GPT-5 API call parameters
+            # OpenAI API call parameters
             completion_params = {
                 "model": self.model,
                 "messages": [
@@ -310,17 +329,20 @@ class ImageDescriber:
                 return "Error", "Empty response from API"
             text_response = text_response.strip()
             
-            # Parse GPT-5 response format: "SHORT: ... LONG: ..."
+            # Parse response format: "SHORT: ... LONG: ..."
             if "SHORT:" in text_response and "LONG:" in text_response:
                 parts = text_response.split("LONG:", 1)
                 short_part = parts[0].replace("SHORT:", "").strip()
                 long_part = parts[1].strip() if len(parts) > 1 else ""
+                short_part = self._limit_short_description(short_part)
                 return short_part, long_part
             else:
                 # Fallback if format is unexpected
                 logger.warning(f"Unexpected response format for {image_path}")
                 words = text_response.split()
-                short_desc = " ".join(words[:10])
+                max_words = self.short_description_max_words or 10
+                short_desc = " ".join(words[:max_words])
+                short_desc = self._limit_short_description(short_desc)
                 return short_desc, text_response
         except Exception as e:
             logger.error(f"Error describing image {image_path}: {str(e)}")
@@ -342,6 +364,7 @@ class ImageProcessor:
         self.output_folder_name = config["output"]["output_folder_name"]
         self.tsv_filename = config["output"]["tsv_filename"]
         self.system_prompt = config["prompt"]["system_prompt"]
+        self.short_description_max_words = config["prompt"].get("short_description_max_words")
         
         self.described_folder_path = FileHelper.ensure_described_folder(folder_path, self.output_folder_name, self.no_copy)
         self.tsv_path = os.path.join(self.described_folder_path, self.tsv_filename)
@@ -351,7 +374,8 @@ class ImageProcessor:
             model=self.model,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
-            system_prompt=self.system_prompt
+            system_prompt=self.system_prompt,
+            short_description_max_words=self.short_description_max_words
         )
         self.progress_lock = Lock()
         
@@ -586,7 +610,8 @@ class CLI:
             model=config["api"]["model"],
             temperature=config["parameters"]["temperature"],
             max_tokens=config["parameters"]["max_tokens"],
-            system_prompt=config["prompt"]["system_prompt"]
+            system_prompt=config["prompt"]["system_prompt"],
+            short_description_max_words=config["prompt"].get("short_description_max_words")
         )
         
         short_desc, long_desc = describer.describe_image(image_path)

@@ -42,10 +42,10 @@ python gid.py /path/to/images --verbose
 - `-c`, `--config`: path to config file
 
 ## Configuration Resolution
-1. Start from `Config.DEFAULT_CONFIG` in `gid.py` (model `gpt-5`, temperature `1`, max tokens `800`).
+1. Start from `Config.DEFAULT_CONFIG` in `gid.py` (model `gpt-4o`, temperature `0.7`, max tokens `800`).
 2. If a config file exists, deep-merge it:
    - `config.json` in the current directory, else `~/.config/gid/config.json`
-   - The repo includes `config.json`, so default runs use its values (model `gpt-4o`, temperature `0.7`).
+   - The repo includes `config.json`, which currently matches the defaults but still overrides.
 3. CLI flags override config values.
 4. `OPENAI_API_KEY` is used only if no API key was provided by file or CLI.
 Note: the CLI help text lists defaults (0.7, 800, gpt-4o), but the actual values come from the config resolution above.
@@ -66,6 +66,7 @@ Note: the CLI help text lists defaults (0.7, 800, gpt-4o), but the actual values
 ## OpenAI Call Behavior (Important)
 - The API request always sends `temperature=1` and `max_completion_tokens=<max_tokens>`.
   - The `--temperature` flag and `config["parameters"]["temperature"]` are currently ignored.
+- Short descriptions are trimmed to `short_description_max_words` (default 10).
 - The prompt instructs the model to output:
   - short description, newline, long description
 - The response parser expects:

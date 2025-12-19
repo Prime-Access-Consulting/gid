@@ -41,13 +41,13 @@ GID is a Python tool for automatically generating human-readable descriptions of
    a. Using environment variable:
    ```bash
    # Linux/macOS
-   export openai_api=your_api_key_here
+   export OPENAI_API_KEY=your_api_key_here
    
    # Windows (Command Prompt)
-   set openai_api=your_api_key_here
+   set OPENAI_API_KEY=your_api_key_here
    
    # Windows (PowerShell)
-   $env:openai_api="your_api_key_here"
+   $env:OPENAI_API_KEY="your_api_key_here"
    ```
    
    b. Using config.json in the current directory:
