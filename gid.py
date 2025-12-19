@@ -207,7 +207,6 @@ class TSVHandler:
     
     def __init__(self, tsv_path: str):
         self.tsv_path = tsv_path
-        self.existing_lines: Set[str] = set()
         self.known_hashes: Set[str] = set()
         self.load()
     
@@ -219,7 +218,6 @@ class TSVHandler:
     def load(self) -> None:
         """
         Load existing lines (4 columns) from the TSV (skipping header).
-        existing_lines -> set of raw lines
         known_hashes -> set of SHA-1 strings from the 4th column
         """
         if not os.path.exists(self.tsv_path):
@@ -232,7 +230,6 @@ class TSVHandler:
                 line = line.strip()
                 if not line:
                     continue
-                self.existing_lines.add(line)
                 parts = line.split("\t")
                 if len(parts) == 4:
                     hash_value = parts[3]
@@ -252,10 +249,9 @@ class TSVHandler:
         escaped_long = self._escape_newlines(long_desc)
         line_to_write = f"{orig_filename}\t{escaped_short}\t{escaped_long}\t{file_hash}"
         
-        if line_to_write not in self.existing_lines:
+        if file_hash not in self.known_hashes:
             with open(self.tsv_path, "a", encoding="utf-8") as tsv_file:
                 tsv_file.write(line_to_write + "\n")
-            self.existing_lines.add(line_to_write)
             self.known_hashes.add(file_hash)
 
 
