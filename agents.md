@@ -43,13 +43,13 @@ python gid.py /path/to/images --verbose
 - `-c`, `--config`: path to config file
 
 ## Configuration Resolution
-1. Start from `Config.DEFAULT_CONFIG` in `gid.py` (model `gpt-5.2`, temperature `0.7`, max tokens `4000`).
+1. Start from `Config.DEFAULT_CONFIG` in `gid.py` (model `gpt-5.2`, temperature `1.0`, max tokens `4000`).
 2. If a config file exists, deep-merge it:
    - `config.json` in the current directory, else `~/.config/gid/config.json`
    - The repo includes `config.json`, which currently matches the defaults but still overrides.
 3. CLI flags override config values.
 4. `OPENAI_API_KEY` is used only if no API key was provided by file or CLI.
-Note: the CLI help text lists defaults (0.7, 4000, gpt-5.2), but the actual values come from the config resolution above.
+Note: the CLI help text lists defaults (1.0, 4000, gpt-5.2), but the actual values come from the config resolution above.
 
 ## Modes and Output
 - **Folder mode** (path is a directory):
@@ -67,7 +67,7 @@ Note: the CLI help text lists defaults (0.7, 4000, gpt-5.2), but the actual valu
 
 ## OpenAI Call Behavior (Important)
 - Uses the Responses API with `input_image` content and `instructions` for the system prompt.
-- Sends `temperature=<config>` and `max_output_tokens=<max_tokens>`.
+- Sends `max_output_tokens=<max_tokens>` and includes `temperature` only when it differs from the default 1.0.
 - If a row has `Context`, it is appended to the prompt as additional image facts (treated as true).
 - Short descriptions are trimmed to `short_description_max_words` (default 10).
 - The prompt instructs the model to output:

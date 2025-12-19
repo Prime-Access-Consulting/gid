@@ -63,7 +63,7 @@ class Config:
             "model": "gpt-5.2"
         },
         "parameters": {
-            "temperature": 0.7,
+            "temperature": 1.0,
             "max_tokens": 4000
         },
         "processing": {
@@ -331,7 +331,7 @@ class ImageDescriber:
         self,
         api_key: str,
         model: str = "gpt-5.2",
-        temperature: float = 0.7,
+        temperature: float = 1.0,
         max_tokens: int = 4000,
         system_prompt: Optional[str] = None,
         short_description_max_words: Optional[int] = None
@@ -372,9 +372,9 @@ class ImageDescriber:
                     f"{context.strip()}"
                 )
 
-            response = self.client.responses.create(
-                model=self.model,
-                input=[
+            response_params = {
+                "model": self.model,
+                "input": [
                     {
                         "role": "user",
                         "content": [
@@ -383,10 +383,13 @@ class ImageDescriber:
                         ]
                     }
                 ],
-                instructions=instructions,
-                max_output_tokens=self.max_tokens,
-                temperature=self.temperature
-            )
+                "instructions": instructions,
+                "max_output_tokens": self.max_tokens
+            }
+            if self.temperature is not None and self.temperature != 1.0:
+                response_params["temperature"] = self.temperature
+
+            response = self.client.responses.create(**response_params)
             
             text_response = response.output_text
             if text_response is None:
@@ -651,7 +654,7 @@ class CLI:
         parser.add_argument(
             "-t", "--temperature",
             type=float,
-            help="Sampling temperature for OpenAI (default=0.7)."
+            help="Sampling temperature for OpenAI (default=1.0)."
         )
         parser.add_argument(
             "-l", "--length",

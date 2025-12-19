@@ -102,7 +102,7 @@ positional arguments:
 options:
   -h, --help            show this help message and exit
   -t TEMPERATURE, --temperature TEMPERATURE
-                        Sampling temperature for OpenAI (default=0.7).
+                        Sampling temperature for OpenAI (default=1.0).
   -l LENGTH, --length LENGTH
                         Max tokens (default=4000).
   --init-tsv            Generate TSV with hashes and empty descriptions/context (folder mode only).
@@ -171,7 +171,7 @@ The configuration file supports the following settings:
     "model": "gpt-5.2"     // OpenAI model to use
   },
   "parameters": {
-    "temperature": 0.7,    // Sampling temperature
+    "temperature": 1.0,    // Sampling temperature
     "max_tokens": 4000     // Maximum response tokens
   },
   "processing": {
