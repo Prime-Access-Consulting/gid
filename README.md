@@ -192,6 +192,15 @@ The configuration file supports the following settings:
 
 Command-line arguments will override settings in the configuration file.
 
+### Prompt Output Format
+
+The default prompt asks the model to return exactly two lines:
+
+- `SHORT: <short description>`
+- `LONG: <long description>`
+
+GID strips these labels when saving to the TSV. If the model returns unlabeled two-line output, GID will still treat the first line as short and the remainder as long.
+
 ## Output Format
 
 ### TSV File

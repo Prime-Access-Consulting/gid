@@ -68,15 +68,15 @@ Note: the CLI help text lists defaults (0.7, 4000, gpt-5.2), but the actual valu
 ## OpenAI Call Behavior (Important)
 - Uses the Responses API with `input_image` content and `instructions` for the system prompt.
 - Sends `temperature=<config>` and `max_output_tokens=<max_tokens>`.
-- If a row has `Context`, it is appended as additional image facts in the prompt.
+- If a row has `Context`, it is appended to the prompt as additional image facts (treated as true).
 - Short descriptions are trimmed to `short_description_max_words` (default 10).
 - The prompt instructs the model to output:
   - `SHORT: ...` on line 1
   - `LONG: ...` on line 2
-- The response parser expects:
-  - `SHORT: ...` and `LONG: ...`
-  - If not found, it accepts a two-line format (first line short, rest long).
-  - If still not found, it falls back to the first N words (default 10) as the short description.
+- The response parser accepts:
+  - `SHORT:` and `LONG:` labels (with common punctuation like `:` or `-`)
+  - Two-line output (first line short, remaining lines long)
+  - Fallback: first N words (default 10) as the short description
 
 ## Code Style Notes
 - Standard library imports first, then third-party, then local
