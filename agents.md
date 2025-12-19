@@ -56,11 +56,16 @@ Note: the CLI help text lists defaults (1.0, 4000, gpt-5.2), but the actual valu
   - Collects images with extensions: `.png .jpg .jpeg .gif .bmp .tiff .webp`
   - Sorts filenames case-insensitively, but processes results in completion order (not strict input order).
 - Writes `descriptions.tsv` (header only if file does not exist):
-    - `OriginalFilename`, `ShortDescription`, `LongDescription`, `Context`, `SHA1`
+    - `OriginalFilename`, `ShortDescription`, `LongDescription`, `Context`, `Composite`, `SHA1`
   - Uses SHA-1 hashes to skip files already present in the TSV and to skip duplicates within the same run.
   - If `ShortDescription` or `LongDescription` is empty for a hash, it will be reprocessed to fill in descriptions.
   - Copies images into `Described/` by default; `--no-copy` keeps everything in the source folder.
   - Short description is sanitized for filename safety; collisions are resolved with `" 2"`, `" 3"`, ... up to 100.
+  - If `Composite` is `yes` (case-insensitive), the row represents a composite set:
+    - `OriginalFilename` should be the base name (e.g., `sina`).
+    - Matching files are `sina-1.jpg`, `sina-2.jpg`, etc. (any image extension).
+    - All composite files are sent together in one request; component rows are skipped.
+    - The composite row's SHA-1 is computed from ordered filenames + file hashes, so changes reprocess.
 - **Single image mode** (path is a file):
   - Outputs short description, then long description to stdout.
   - No files are created.
@@ -69,6 +74,7 @@ Note: the CLI help text lists defaults (1.0, 4000, gpt-5.2), but the actual valu
 - Uses the Responses API with `input_image` content and `instructions` for the system prompt.
 - Sends `max_output_tokens=<max_tokens>` and includes `temperature` only when it differs from the default 1.0.
 - If a row has `Context`, it is appended to the prompt as additional image facts (treated as true).
+- Composite rows use a multi-image prompt: "Describe the following images together as a single composite."
 - Short descriptions are trimmed to `short_description_max_words` (default 10).
 - The prompt instructs the model to output:
   - `SHORT: ...` on line 1

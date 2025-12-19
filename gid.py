@@ -9,12 +9,13 @@ Folder mode:
   Processes images in a specified folder, storing metadata in a TSV, and optionally
   copying them into a 'Described' subfolder.
 
-  We output five columns in the TSV:
+  We output six columns in the TSV:
     1) OriginalFilename
     2) ShortDescription
     3) LongDescription
     4) Context
-    5) SHA1
+    5) Composite
+    6) SHA1
 
 Features:
   - SHA-1-based checks for previously processed images
@@ -33,7 +34,8 @@ import hashlib
 import argparse
 import logging
 import json
-from typing import Tuple, List, Dict, Optional, Any
+from pathlib import Path
+from typing import Tuple, List, Dict, Optional, Any, Set
 from dataclasses import dataclass
 from openai import OpenAI
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -156,7 +158,17 @@ class TSVEntry:
     short_desc: str
     long_desc: str
     context: str
+    composite: bool
     file_hash: str
+
+
+@dataclass
+class CompositeResult:
+    """Data class to store composite image processing results."""
+    entry: TSVEntry
+    composite_hash: str
+    short_desc: str
+    long_desc: str
 
 
 class FileHelper:
@@ -219,9 +231,10 @@ class TSVHandler:
     
     def __init__(self, tsv_path: str):
         self.tsv_path = tsv_path
+        self.entries: List[TSVEntry] = []
         self.entries_by_hash: Dict[str, TSVEntry] = {}
-        self.hash_order: List[str] = []
         self.has_context_column = False
+        self.has_composite_column = False
         self.load()
     
     @staticmethod
@@ -243,35 +256,71 @@ class TSVHandler:
         
         with open(self.tsv_path, "r", encoding="utf-8") as tsv_file:
             header = next(tsv_file, None)
-            if header:
-                header_cols = header.strip().split("\t")
-                self.has_context_column = "Context" in header_cols
+            header_cols = header.strip().split("\t") if header else []
+            col_index = {col: idx for idx, col in enumerate(header_cols)}
+            if header_cols:
+                self.has_context_column = "Context" in col_index
+                self.has_composite_column = "Composite" in col_index
             for line in tsv_file:
                 line = line.strip()
                 if not line:
                     continue
                 parts = line.split("\t")
-                if self.has_context_column and len(parts) >= 5:
-                    orig_filename, short_desc, long_desc, context, hash_value = parts[:5]
-                elif len(parts) >= 4:
-                    orig_filename, short_desc, long_desc, hash_value = parts[:4]
-                    context = ""
+                if not header_cols:
+                    if len(parts) >= 6:
+                        orig_filename, short_desc, long_desc, context, composite_raw, hash_value = parts[:6]
+                    elif len(parts) >= 5:
+                        orig_filename, short_desc, long_desc, context, hash_value = parts[:5]
+                        composite_raw = ""
+                    elif len(parts) >= 4:
+                        orig_filename, short_desc, long_desc, hash_value = parts[:4]
+                        context = ""
+                        composite_raw = ""
+                    else:
+                        continue
                 else:
-                    continue
+                    def col(name: str, default: str = "") -> str:
+                        idx = col_index.get(name)
+                        if idx is None or idx >= len(parts):
+                            return default
+                        return parts[idx]
+
+                    orig_filename = col("OriginalFilename", parts[0] if parts else "")
+                    short_desc = col("ShortDescription", parts[1] if len(parts) > 1 else "")
+                    long_desc = col("LongDescription", parts[2] if len(parts) > 2 else "")
+                    context = col("Context", "")
+                    composite_raw = col("Composite", "")
+                    hash_value = col("SHA1", parts[-1] if parts else "")
+
+                composite = composite_raw.strip().lower() == "yes"
                 entry = TSVEntry(
                     original_filename=orig_filename,
                     short_desc=self._unescape_newlines(short_desc),
                     long_desc=self._unescape_newlines(long_desc),
                     context=self._unescape_newlines(context),
+                    composite=composite,
                     file_hash=hash_value
                 )
-                if hash_value not in self.entries_by_hash:
+                self.entries.append(entry)
+                if hash_value and hash_value not in self.entries_by_hash:
                     self.entries_by_hash[hash_value] = entry
-                    self.hash_order.append(hash_value)
 
     def get_entry(self, file_hash: str) -> Optional[TSVEntry]:
         """Get an entry by hash if it exists."""
         return self.entries_by_hash.get(file_hash)
+
+    def get_composite_entries(self) -> List[TSVEntry]:
+        """Return all composite entries."""
+        return [entry for entry in self.entries if entry.composite]
+
+    def update_entry_hash(self, entry: TSVEntry, new_hash: str) -> None:
+        """Update the hash for an entry and maintain the lookup map."""
+        old_hash = entry.file_hash
+        if old_hash and self.entries_by_hash.get(old_hash) is entry:
+            del self.entries_by_hash[old_hash]
+        entry.file_hash = new_hash
+        if new_hash and new_hash not in self.entries_by_hash:
+            self.entries_by_hash[new_hash] = entry
 
     def upsert_entry(
         self,
@@ -279,19 +328,23 @@ class TSVHandler:
         short_desc: str,
         long_desc: str,
         context: str,
-        file_hash: str
+        file_hash: str,
+        composite: bool = False
     ) -> None:
         """Insert or update an entry keyed by file hash."""
         entry = self.entries_by_hash.get(file_hash)
         if entry is None:
-            self.entries_by_hash[file_hash] = TSVEntry(
+            entry = TSVEntry(
                 original_filename=orig_filename,
                 short_desc=short_desc,
                 long_desc=long_desc,
                 context=context,
+                composite=composite,
                 file_hash=file_hash
             )
-            self.hash_order.append(file_hash)
+            self.entries.append(entry)
+            if file_hash:
+                self.entries_by_hash[file_hash] = entry
             return
 
         if not entry.original_filename:
@@ -302,23 +355,25 @@ class TSVHandler:
             entry.long_desc = long_desc
         if context:
             entry.context = context
+        entry.composite = entry.composite or composite
+        if file_hash and file_hash not in self.entries_by_hash:
+            self.entries_by_hash[file_hash] = entry
 
     def write_all(self) -> None:
         """Rewrite the TSV with the current entries."""
         with open(self.tsv_path, "w", encoding="utf-8") as tsv_file:
-            tsv_file.write("OriginalFilename\tShortDescription\tLongDescription\tContext\tSHA1\n")
-            for hash_value in self.hash_order:
-                entry = self.entries_by_hash.get(hash_value)
-                if not entry:
-                    continue
+            tsv_file.write("OriginalFilename\tShortDescription\tLongDescription\tContext\tComposite\tSHA1\n")
+            for entry in self.entries:
                 escaped_short = self._escape_newlines(entry.short_desc)
                 escaped_long = self._escape_newlines(entry.long_desc)
                 escaped_context = self._escape_newlines(entry.context)
+                composite_value = "yes" if entry.composite else "no"
                 line = (
                     f"{entry.original_filename}\t"
                     f"{escaped_short}\t"
                     f"{escaped_long}\t"
                     f"{escaped_context}\t"
+                    f"{composite_value}\t"
                     f"{entry.file_hash}"
                 )
                 tsv_file.write(line + "\n")
@@ -355,14 +410,25 @@ class ImageDescriber:
         return " ".join(words[:max_words])
     
     def describe_image(self, image_path: str, context: str = "") -> Tuple[str, str]:
+        """Call the OpenAI API to describe a single image."""
+        return self.describe_images([image_path], context)
+
+    def describe_images(self, image_paths: List[str], context: str = "") -> Tuple[str, str]:
         """
-        Call the OpenAI API to generate short and long descriptions of an image.
+        Call the OpenAI API to generate short and long descriptions of one or more images.
         Returns (short_desc, long_desc).
         """
         try:
-            encoded_image = FileHelper.encode_image(image_path)
-            extension = os.path.splitext(image_path)[1][1:].lower()
-            data_url = f"data:image/{extension};base64,{encoded_image}"
+            content = []
+            prompt_text = "Describe the following image."
+            if len(image_paths) > 1:
+                prompt_text = "Describe the following images together as a single composite."
+            content.append({"type": "input_text", "text": prompt_text})
+            for image_path in image_paths:
+                encoded_image = FileHelper.encode_image(image_path)
+                extension = os.path.splitext(image_path)[1][1:].lower()
+                data_url = f"data:image/{extension};base64,{encoded_image}"
+                content.append({"type": "input_image", "image_url": data_url})
 
             instructions = self.system_prompt
             if context.strip():
@@ -377,10 +443,7 @@ class ImageDescriber:
                 "input": [
                     {
                         "role": "user",
-                        "content": [
-                            {"type": "input_text", "text": "Describe the following image."},
-                            {"type": "input_image", "image_url": data_url}
-                        ]
+                        "content": content
                     }
                 ],
                 "instructions": instructions,
@@ -393,7 +456,7 @@ class ImageDescriber:
             
             text_response = response.output_text
             if text_response is None:
-                logger.error(f"Empty response from API for {image_path}")
+                logger.error("Empty response from API.")
                 return "Error", "Empty response from API"
             text_response = text_response.strip()
 
@@ -477,7 +540,11 @@ class ImageProcessor:
             logging.getLogger("openai").setLevel(logging.INFO)
             logging.getLogger("httpx").setLevel(logging.INFO)
     
-    def collect_image_files(self, include_existing: bool = False) -> List[Tuple[str, str, str, str]]:
+    def collect_image_files(
+        self,
+        include_existing: bool = False,
+        skip_filenames: Optional[Set[str]] = None
+    ) -> List[Tuple[str, str, str, str]]:
         """
         Collect image files that need processing.
         Returns a list of tuples: (filename, image_path, file_hash, context)
@@ -491,6 +558,8 @@ class ImageProcessor:
         # Identify which files need describing, preserving sorted order
         for filename in all_files:
             if filename.lower().endswith(VALID_EXTENSIONS):
+                if skip_filenames and filename.lower() in skip_filenames:
+                    continue
                 image_path = os.path.join(self.folder_path, filename)
                 file_hash = FileHelper.hash_file(image_path)
                 entry = self.tsv_handler.get_entry(file_hash)
@@ -524,7 +593,85 @@ class ImageProcessor:
             long_desc=long_desc,
             context=context
         )
-    
+
+    def _find_composite_files(self, base_name: str) -> List[Tuple[int, str, str, str]]:
+        """Find composite files matching base-name-N.ext pattern."""
+        pattern = re.compile(
+            rf"^{re.escape(base_name)}-(\d+)\.([A-Za-z0-9]+)$",
+            re.IGNORECASE
+        )
+        matches = []
+        for filename in os.listdir(self.folder_path):
+            if not filename.lower().endswith(VALID_EXTENSIONS):
+                continue
+            match = pattern.match(filename)
+            if match:
+                index = int(match.group(1))
+                image_path = os.path.join(self.folder_path, filename)
+                file_hash = FileHelper.hash_file(image_path)
+                matches.append((index, filename, image_path, file_hash))
+        matches.sort(key=lambda item: item[0])
+        return matches
+
+    @staticmethod
+    def _compute_composite_hash(files: List[Tuple[int, str, str, str]]) -> str:
+        """Compute a hash from the ordered list of composite file hashes."""
+        sha1 = hashlib.sha1()
+        for _index, filename, _path, file_hash in files:
+            sha1.update(f"{filename}\t{file_hash}\n".encode("utf-8"))
+        return sha1.hexdigest()
+
+    def collect_composite_tasks(
+        self
+    ) -> Tuple[List[Tuple[TSVEntry, List[Tuple[int, str, str, str]], str]], Set[str]]:
+        """Collect composite tasks and the filenames they cover."""
+        tasks = []
+        skip_filenames: Set[str] = set()
+        for entry in self.tsv_handler.get_composite_entries():
+            base_name = Path(entry.original_filename).stem
+            if not base_name:
+                continue
+            matches = self._find_composite_files(base_name)
+            if not matches:
+                logger.warning(f"No composite files found for base name '{base_name}'.")
+                continue
+            for _index, filename, _path, _file_hash in matches:
+                skip_filenames.add(filename.lower())
+            composite_hash = self._compute_composite_hash(matches)
+            previous_hash = entry.file_hash
+            self.tsv_handler.update_entry_hash(entry, composite_hash)
+            if entry.short_desc and entry.long_desc and previous_hash == composite_hash:
+                continue
+            tasks.append((entry, matches, composite_hash))
+        return tasks, skip_filenames
+
+    def process_composite_task(
+        self,
+        task: Tuple[TSVEntry, List[Tuple[int, str, str, str]], str]
+    ) -> Optional[CompositeResult]:
+        """Process a composite image set and return the result."""
+        entry, files, composite_hash = task
+        if not self.describer:
+            logger.error("Image describer is not initialized.")
+            return None
+        image_paths = [path for _index, _filename, path, _hash in files]
+        short_desc, long_desc = self.describer.describe_images(image_paths, entry.context)
+        if short_desc == "Error":
+            return None
+        return CompositeResult(
+            entry=entry,
+            composite_hash=composite_hash,
+            short_desc=short_desc,
+            long_desc=long_desc
+        )
+
+    def handle_composite_result(self, result: CompositeResult) -> None:
+        """Update TSV entry for a composite result (no file copying)."""
+        short_desc = FileHelper.sanitize_filename(result.short_desc)
+        result.entry.short_desc = short_desc
+        result.entry.long_desc = result.long_desc
+        self.tsv_handler.update_entry_hash(result.entry, result.composite_hash)
+
     def handle_image_result(self, result: ImageResult) -> None:
         """
         Handle the image processing result - copy file and add to TSV.
@@ -577,10 +724,12 @@ class ImageProcessor:
     
     def process_all(self) -> None:
         """Process all images in the folder."""
-        tasks = self.collect_image_files()
-        total_count = len(tasks)
+        composite_tasks, skip_filenames = self.collect_composite_tasks()
+        tasks = self.collect_image_files(skip_filenames=skip_filenames)
+        total_count = len(tasks) + len(composite_tasks)
         
         if total_count == 0:
+            self.tsv_handler.write_all()
             logger.info("No new images to process.")
             return
         
@@ -591,9 +740,13 @@ class ImageProcessor:
         
         # Parallel describing
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            future_to_task = {executor.submit(self.process_image, task): task for task in tasks}
+            future_to_kind = {}
+            for task in tasks:
+                future_to_kind[executor.submit(self.process_image, task)] = "image"
+            for task in composite_tasks:
+                future_to_kind[executor.submit(self.process_composite_task, task)] = "composite"
             
-            for future in as_completed(future_to_task):
+            for future in as_completed(future_to_kind):
                 result = future.result()
                 
                 with self.progress_lock:
@@ -601,8 +754,12 @@ class ImageProcessor:
                     logger.info(f"{done_count} of {total_count}")
                 
                 if result:
-                    self.handle_image_result(result)
-
+                    kind = future_to_kind[future]
+                    if kind == "image":
+                        self.handle_image_result(result)
+                    else:
+                        self.handle_composite_result(result)
+        
         # Rewrite TSV with updated entries
         self.tsv_handler.write_all()
         logger.info(f"Processed {done_count} images.")
@@ -611,8 +768,8 @@ class ImageProcessor:
         """Initialize a TSV with hashes and empty descriptions/context."""
         all_files = sorted(os.listdir(self.folder_path), key=str.lower)
         pending_hashes = set()
+        self.tsv_handler.entries = []
         self.tsv_handler.entries_by_hash.clear()
-        self.tsv_handler.hash_order.clear()
 
         total_count = 0
         for filename in all_files:
@@ -646,8 +803,8 @@ class CLI:
     def parse_args() -> argparse.Namespace:
         """Parse command-line arguments."""
         parser = argparse.ArgumentParser(
-            description="Describe images with OpenAI. For folders, writes 5 columns in TSV:\n"
-                        "OriginalFilename, ShortDescription, LongDescription, Context, SHA1.\n"
+            description="Describe images with OpenAI. For folders, writes 6 columns in TSV:\n"
+                        "OriginalFilename, ShortDescription, LongDescription, Context, Composite, SHA1.\n"
                         "For single image files, outputs descriptions directly."
         )
         parser.add_argument("path", nargs="?", help="Path to folder or single image file.")

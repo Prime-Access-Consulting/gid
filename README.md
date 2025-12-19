@@ -15,6 +15,7 @@ GID is a Python tool for automatically generating human-readable descriptions of
   - Optionally copies images to a "Described" subfolder with descriptive filenames (folder mode)
 - **Progress Tracking**: Shows processing progress as you go
 - **Resumable**: Can be stopped and restarted without duplicating work
+- **Composite Support**: Describe multi-image composites as a single unit with a dedicated TSV row
 
 ## Installation
 
@@ -212,7 +213,8 @@ The script generates a tab-separated values (TSV) file with the following column
 2. **ShortDescription**: A short description suitable for filenames (10 words or less)
 3. **LongDescription**: A detailed description of the image content
 4. **Context**: Optional per-image facts provided by a user to improve descriptions
-5. **SHA1**: A SHA-1 hash of the image file for deduplication
+5. **Composite**: `yes` or `no` (case-insensitive). If `yes`, this row represents a composite image set.
+6. **SHA1**: A SHA-1 hash of the image file for deduplication
 
 ### Initialize a TSV for Context
 
@@ -222,7 +224,17 @@ To create a TSV with hashes and empty description fields (so someone can fill in
 python gid.py /path/to/images --init-tsv
 ```
 
-This does not call the API or copy any files. Then add per-image context in the **Context** column and rerun the tool normally. If **ShortDescription** or **LongDescription** is empty, GID will generate descriptions for that row and append the context to the prompt as additional image facts.
+This does not call the API or copy any files. Then add per-image context in the **Context** column and rerun the tool normally. If **ShortDescription** or **LongDescription** is empty, GID will generate descriptions for that row and append the context to the prompt as additional image facts. The **Composite** column defaults to `no` unless you change it.
+
+### Composite Images
+
+To describe multiple related images as a single composite:
+
+1. Add a new row whose **OriginalFilename** is the shared base name (for example, `sina`).
+2. Set **Composite** to `yes`.
+3. Ensure the actual files are named like `sina-1.jpg`, `sina-2.jpg`, `sina-3.jpg`, etc.
+
+When GID runs, it will find all matching `base-<number>.<ext>` files, send them together in one request, and save the composite description on the composite row. Component rows are skipped during processing. The composite row's **SHA1** is computed from the ordered list of component filenames + hashes, so changing any component triggers a reprocess.
 
 ### Described Folder
 
