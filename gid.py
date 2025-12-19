@@ -394,23 +394,32 @@ class ImageDescriber:
                 return "Error", "Empty response from API"
             text_response = text_response.strip()
 
-            # Parse response format: "SHORT: ... LONG: ..."
-            match = re.search(
-                r"(?is)short\\s*:\\s*(.*?)\\s*long\\s*:\\s*(.*)",
-                text_response
-            )
-            if match:
-                short_part = match.group(1).strip()
-                long_part = match.group(2).strip()
-                short_part = self._limit_short_description(short_part)
-                return short_part, long_part
+            label_pattern = r"\b{label}\b(?:\s+description)?\s*[:\-\u2013\u2014\uFF1A]?"
+            short_match = re.search(label_pattern.format(label="short"), text_response, flags=re.IGNORECASE)
+            long_match = re.search(label_pattern.format(label="long"), text_response, flags=re.IGNORECASE)
+            if short_match and long_match and long_match.start() > short_match.end():
+                short_part = text_response[short_match.end():long_match.start()].strip()
+                long_part = text_response[long_match.end():].strip()
+                if short_part and long_part:
+                    short_part = self._limit_short_description(short_part)
+                    return short_part, long_part
 
             # Parse two-line format: first non-empty line is short, rest is long
             lines = [line.strip() for line in text_response.splitlines() if line.strip()]
             if len(lines) >= 2:
-                short_part = re.sub(r"^short( description)?\\s*:\\s*", "", lines[0], flags=re.IGNORECASE).strip()
+                short_part = re.sub(
+                    label_pattern.format(label="short"),
+                    "",
+                    lines[0],
+                    flags=re.IGNORECASE
+                ).strip()
                 long_part = "\n".join(lines[1:]).strip()
-                long_part = re.sub(r"^long( description)?\\s*:\\s*", "", long_part, flags=re.IGNORECASE).strip()
+                long_part = re.sub(
+                    label_pattern.format(label="long"),
+                    "",
+                    long_part,
+                    flags=re.IGNORECASE
+                ).strip()
                 short_part = self._limit_short_description(short_part)
                 if long_part:
                     return short_part, long_part
