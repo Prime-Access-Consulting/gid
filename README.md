@@ -118,6 +118,8 @@ options:
                         OpenAI model to use (default: gpt-5.2)
 ```
 
+Temperature defaults to **1.0** unless you override it with `--temperature` or the config file.
+
 ### Examples
 
 Process images with higher temperature (more creative descriptions):
