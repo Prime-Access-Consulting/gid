@@ -665,6 +665,31 @@ class ImageProcessor:
             long_desc=long_desc
         )
 
+    def discover_composites(self) -> List[Tuple[str, List[str]]]:
+        """Discover composite sets based on TSV composite rows."""
+        composites: List[Tuple[str, List[str]]] = []
+        for entry in self.tsv_handler.get_composite_entries():
+            base_name = Path(entry.original_filename).stem
+            if not base_name:
+                continue
+            matches = self._find_composite_files(base_name)
+            if not matches:
+                logger.warning(f"No composite files found for base name '{base_name}'.")
+                continue
+            composites.append((base_name, [filename for _index, filename, _path, _hash in matches]))
+        return composites
+
+    def show_composites(self) -> None:
+        """Print composite base names and their matching files."""
+        composites = self.discover_composites()
+        if not composites:
+            logger.info("No composites found.")
+            return
+        for base_name, files in composites:
+            logger.info(f"{base_name}:")
+            for filename in files:
+                logger.info(f"  - {filename}")
+
     def handle_composite_result(self, result: CompositeResult) -> None:
         """Update TSV entry for a composite result (no file copying)."""
         short_desc = FileHelper.sanitize_filename(result.short_desc)
@@ -866,6 +891,11 @@ class CLI:
             help="Generate TSV with hashes and empty descriptions/context (folder mode only)."
         )
         parser.add_argument(
+            "--show-composites",
+            action="store_true",
+            help="List discovered composite sets and their matching files (folder mode only)."
+        )
+        parser.add_argument(
             "-m", "--model",
             type=str,
             help="OpenAI model to use (default: gpt-5.2)"
@@ -946,13 +976,20 @@ class CLI:
         config = CLI.get_config(args)
         
         # Check for API key unless we're initializing a TSV
-        if not args.init_tsv and not config["api"]["api_key"]:
+        if not args.init_tsv and not args.show_composites and not config["api"]["api_key"]:
             print("Error: OpenAI API key not provided. Use -k/--api-key, set OPENAI_API_KEY environment variable, or add it to config.json.", file=sys.stderr)
             sys.exit(1)
         
         # Check if path is a directory or a file
         if os.path.isdir(args.path):
-            if args.init_tsv:
+            if args.show_composites:
+                processor = ImageProcessor(
+                    folder_path=args.path,
+                    config=config,
+                    init_only=True
+                )
+                processor.show_composites()
+            elif args.init_tsv:
                 processor = ImageProcessor(
                     folder_path=args.path,
                     config=config,
@@ -969,6 +1006,9 @@ class CLI:
         elif os.path.isfile(args.path) and args.path.lower().endswith(VALID_EXTENSIONS):
             if args.init_tsv:
                 print("Error: --init-tsv is only supported for folder mode.", file=sys.stderr)
+                sys.exit(1)
+            if args.show_composites:
+                print("Error: --show-composites is only supported for folder mode.", file=sys.stderr)
                 sys.exit(1)
             # Process single image
             CLI.process_single_image(

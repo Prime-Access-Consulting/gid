@@ -107,6 +107,7 @@ options:
   -l LENGTH, --length LENGTH
                         Max tokens (default=4000).
   --init-tsv            Generate TSV with hashes and empty descriptions/context (folder mode only).
+  --show-composites     List discovered composite sets and their matching files (folder mode only).
   -n, --no-copy         If provided, do NOT copy files to the output folder (folder mode only).
   -k API_KEY, --api-key API_KEY
                         OpenAI API key (overrides config file and environment variable).

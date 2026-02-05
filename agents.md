@@ -37,6 +37,7 @@ python gid.py /path/to/images --verbose
 - `-t`, `--temperature`: sampling temperature
 - `-l`, `--length`: max tokens (mapped to `max_output_tokens`)
 - `--init-tsv`: generate TSV with hashes and empty descriptions/context (folder mode only, no API calls)
+- `--show-composites`: list detected composite sets and their matching files (folder mode only)
 - `-n`, `--no-copy`: skip copying in folder mode
 - `-w`, `--workers`: max worker threads (folder mode)
 - `-v`, `--verbose`: enable OpenAI + HTTPX request logs
