@@ -232,9 +232,9 @@ To describe multiple related images as a single composite:
 
 1. Add a new row whose **OriginalFilename** is the shared base name (for example, `sina`).
 2. Set **Composite** to `yes`.
-3. Ensure the actual files are named like `sina-1.jpg`, `sina-2.jpg`, `sina-3.jpg`, etc.
+3. Ensure the actual files are named like `sina_1.jpg`, `sina_2.jpg`, `sina_3.jpg`, etc.
 
-When GID runs, it will find all matching `base-<number>.<ext>` files, send them together in one request, and save the composite description on the composite row. Component rows are skipped during processing. The composite row's **SHA1** is computed from the ordered list of component filenames + hashes, so changing any component triggers a reprocess.
+When GID runs, it will find all matching `base_<number>.<ext>` files, send them together in one request, and save the composite description on the composite row. Component rows are skipped during processing. The composite row's **SHA1** is computed from the ordered list of component filenames + hashes, so changing any component triggers a reprocess.
 
 ### Described Folder
 

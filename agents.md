@@ -63,7 +63,7 @@ Note: the CLI help text lists defaults (1.0, 4000, gpt-5.2), but the actual valu
   - Short description is sanitized for filename safety; collisions are resolved with `" 2"`, `" 3"`, ... up to 100.
   - If `Composite` is `yes` (case-insensitive), the row represents a composite set:
     - `OriginalFilename` should be the base name (e.g., `sina`).
-    - Matching files are `sina-1.jpg`, `sina-2.jpg`, etc. (any image extension).
+    - Matching files are `sina_1.jpg`, `sina_2.jpg`, etc. (any image extension).
     - All composite files are sent together in one request; component rows are skipped.
     - The composite row's SHA-1 is computed from ordered filenames + file hashes, so changes reprocess.
 - **Single image mode** (path is a file):

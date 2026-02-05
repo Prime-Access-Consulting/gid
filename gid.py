@@ -597,7 +597,7 @@ class ImageProcessor:
     def _find_composite_files(self, base_name: str) -> List[Tuple[int, str, str, str]]:
         """Find composite files matching base-name-N.ext pattern."""
         pattern = re.compile(
-            rf"^{re.escape(base_name)}-(\d+)\.([A-Za-z0-9]+)$",
+            rf"^{re.escape(base_name)}_(\d+)\.([A-Za-z0-9]+)$",
             re.IGNORECASE
         )
         matches = []
