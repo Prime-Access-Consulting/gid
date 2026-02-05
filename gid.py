@@ -660,9 +660,18 @@ class ImageProcessor:
         )
 
     @staticmethod
-    def _normalize_base_name(name: str) -> str:
+    def _strip_image_extension(name: str) -> str:
+        """Remove a known image extension from the end of the name, if present."""
+        lower = name.lower()
+        for ext in VALID_EXTENSIONS:
+            if lower.endswith(ext):
+                return name[:-len(ext)]
+        return name
+
+    @classmethod
+    def _normalize_base_name(cls, name: str) -> str:
         """Normalize a composite base name for matching."""
-        return Path(name).stem.lower()
+        return cls._strip_image_extension(name).lower()
 
     def _discover_composite_sets(self) -> List[Tuple[str, List[Tuple[int, str, str, str]]]]:
         """Discover composite sets based on underscore-numbered filenames."""
@@ -717,6 +726,19 @@ class ImageProcessor:
         return composite_sets
 
     @staticmethod
+    def _preferred_composite_name(
+        base_name: str,
+        files: List[Tuple[int, str, str, str]]
+    ) -> str:
+        """Choose the composite row's OriginalFilename, including an extension."""
+        for index, filename, _path, _hash in files:
+            if index == -1:
+                return filename
+        first_name = files[0][1]
+        _, ext = os.path.splitext(first_name)
+        return f"{base_name}{ext}" if ext else base_name
+
+    @staticmethod
     def _compute_composite_hash(files: List[Tuple[int, str, str, str]]) -> str:
         """Compute a hash from the ordered list of composite file hashes."""
         sha1 = hashlib.sha1()
@@ -735,19 +757,21 @@ class ImageProcessor:
         skip_filenames: Set[str] = set()
         composite_sets = self._discover_composite_sets()
         composite_entries = self.tsv_handler.get_composite_entries()
-        entry_by_base = {
-            self._normalize_base_name(entry.original_filename): entry
-            for entry in composite_entries
-        }
+        entry_by_base = {}
+        for entry in composite_entries:
+            key = self._normalize_base_name(entry.original_filename)
+            if key not in entry_by_base:
+                entry_by_base[key] = entry
         discovered_bases: Set[str] = set()
 
         for base_name, files in composite_sets:
-            base_key = base_name.lower()
+            base_key = self._normalize_base_name(base_name)
             discovered_bases.add(base_key)
             entry = entry_by_base.get(base_key)
+            preferred_name = self._preferred_composite_name(base_name, files)
             if entry is None:
                 entry = TSVEntry(
-                    original_filename=base_name,
+                    original_filename=preferred_name,
                     short_desc="",
                     long_desc="",
                     context="",
@@ -757,6 +781,8 @@ class ImageProcessor:
                 self.tsv_handler.entries.append(entry)
             else:
                 entry.composite = True
+                if self._strip_image_extension(entry.original_filename) == entry.original_filename:
+                    entry.original_filename = preferred_name
 
             for _index, filename, _path, _file_hash in files:
                 skip_filenames.add(filename.lower())
@@ -771,8 +797,7 @@ class ImageProcessor:
         for entry in composite_entries:
             base_key = self._normalize_base_name(entry.original_filename)
             if base_key not in discovered_bases:
-                base_name = Path(entry.original_filename).stem
-                logger.warning(f"No composite files found for base name '{base_name}'.")
+                logger.warning(f"No composite files found for base name '{entry.original_filename}'.")
 
         return tasks, skip_filenames
 
@@ -949,9 +974,10 @@ class ImageProcessor:
                 for _index, filename, _path, _file_hash in files:
                     skip_filenames.add(filename.lower())
                 composite_hash = self._compute_composite_hash(files)
+                preferred_name = self._preferred_composite_name(base_name, files)
                 total_count += 1
                 self.tsv_handler.upsert_entry(
-                    orig_filename=base_name,
+                    orig_filename=preferred_name,
                     short_desc="",
                     long_desc="",
                     context="",

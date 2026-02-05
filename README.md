@@ -256,7 +256,7 @@ To describe multiple related images as a single composite:
 3. (Optional) Run `--init-tsv` to generate a composite row, then add any shared **Context** to that row.
 4. Run GID normally. It will detect composites automatically unless `--no-composites` is set.
 
-When GID runs, it will find all matching `base_<number>.<ext>` files (plus `base.<ext>` if present), send them together in one request, and save the composite description on the composite row. Component rows are skipped during processing. The composite row's **SHA1** is computed from the ordered list of component filenames + hashes, so changing any component triggers a reprocess.
+When GID runs, it will find all matching `base_<number>.<ext>` files (plus `base.<ext>` if present), send them together in one request, and save the composite description on the composite row. Component rows are skipped during processing. The composite row’s **OriginalFilename** includes an extension (for example, `base.jpg`) to preserve naming. The composite row's **SHA1** is computed from the ordered list of component filenames + hashes, so changing any component triggers a reprocess.
 
 ### Described Folder
 

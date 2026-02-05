@@ -67,7 +67,7 @@ Note: the CLI help text lists defaults (1.0, 4000, gpt-5.2), but the actual valu
   - Composite detection is automatic (disable with `--no-composites`):
     - Files named like `base_<number>.<ext>` are grouped into one composite set.
     - If `base.<ext>` exists, it is included in the composite set automatically.
-    - The composite row uses `OriginalFilename` as the base name (e.g., `sina`).
+    - The composite row uses `OriginalFilename` with an extension (e.g., `sina.jpg`).
     - All composite files are sent together in one request; component rows are skipped.
     - The composite row's SHA-1 is computed from ordered filenames + file hashes, so changes reprocess.
 - **Single image mode** (path is a file):
