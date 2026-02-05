@@ -107,6 +107,7 @@ options:
   -l LENGTH, --length LENGTH
                         Max tokens (default=4000).
   --init-tsv            Generate TSV with hashes and empty descriptions/context (folder mode only).
+  --make-excel          Generate an Excel .xlsx file from the existing TSV (folder mode only).
   --no-composites       Disable automatic composite detection (process all images individually).
   --show-composites     List discovered composite sets and their matching files (folder mode only).
   -n, --no-copy         If provided, do NOT copy files to the output folder (folder mode only).
@@ -158,6 +159,11 @@ python gid.py /path/to/images --verbose
 Use a specific config file:
 ```bash
 python gid.py /path/to/images --config /path/to/my-config.json
+```
+
+Generate an Excel file from an existing TSV (no API calls):
+```bash
+python gid.py /path/to/images --make-excel
 ```
 
 ### Configuration File
@@ -225,6 +231,10 @@ The script generates a tab-separated values (TSV) file with the following column
 4. **Context**: Optional per-image facts provided by a user to improve descriptions
 5. **Composite**: `yes` or `no` (case-insensitive). If `yes`, this row represents a composite image set (auto-detected by filename unless `--no-composites` is used).
 6. **SHA1**: A SHA-1 hash of the image file for deduplication
+
+### Excel Output
+
+Use `--make-excel` to generate `descriptions.xlsx` in the same folder as the TSV. The spreadsheet uses the same columns, with unescaped text (real newlines and Unicode preserved).
 
 ### Initialize a TSV for Context
 

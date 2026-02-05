@@ -382,6 +382,39 @@ class TSVHandler:
                 )
                 tsv_file.write(line + "\n")
 
+    def write_excel(self, xlsx_path: str) -> bool:
+        """Write the current entries to an Excel .xlsx file."""
+        try:
+            from openpyxl import Workbook
+        except ImportError:
+            logger.error("openpyxl is required for --make-excel. Install with: pip install openpyxl")
+            return False
+
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = "descriptions"
+        worksheet.append([
+            "OriginalFilename",
+            "ShortDescription",
+            "LongDescription",
+            "Context",
+            "Composite",
+            "SHA1"
+        ])
+        for entry in self.entries:
+            composite_value = "yes" if entry.composite else "no"
+            worksheet.append([
+                entry.original_filename,
+                entry.short_desc,
+                entry.long_desc,
+                entry.context,
+                composite_value,
+                entry.file_hash
+            ])
+
+        workbook.save(xlsx_path)
+        return True
+
 
 class ImageDescriber:
     """Class to interact with OpenAI API for image description."""
@@ -951,6 +984,15 @@ class ImageProcessor:
         self.tsv_handler.write_all()
         logger.info(f"Initialized TSV for {total_count} rows.")
 
+    def make_excel(self) -> None:
+        """Generate an Excel file from the current TSV entries."""
+        if not os.path.exists(self.tsv_path):
+            logger.error(f"No TSV found at {self.tsv_path}")
+            return
+        xlsx_path = str(Path(self.tsv_path).with_suffix(".xlsx"))
+        if self.tsv_handler.write_excel(xlsx_path):
+            logger.info(f"Wrote Excel file to {xlsx_path}")
+
 
 class CLI:
     """Command-line interface handler."""
@@ -1003,6 +1045,11 @@ class CLI:
             "--init-tsv",
             action="store_true",
             help="Generate TSV with hashes and empty descriptions/context (folder mode only; composites auto-detected unless --no-composites)."
+        )
+        parser.add_argument(
+            "--make-excel",
+            action="store_true",
+            help="Generate an Excel .xlsx file from the existing TSV (folder mode only)."
         )
         parser.add_argument(
             "--no-composites",
@@ -1110,27 +1157,25 @@ class CLI:
         # Get configuration
         config = CLI.get_config(args)
         
-        # Check for API key unless we're initializing a TSV
-        if not args.init_tsv and not args.show_composites and not config["api"]["api_key"]:
+        # Check for API key unless we're in a no-API mode
+        if not args.init_tsv and not args.show_composites and not args.make_excel and not config["api"]["api_key"]:
             print("Error: OpenAI API key not provided. Use -k/--api-key, set OPENAI_API_KEY environment variable, or add it to config.json.", file=sys.stderr)
             sys.exit(1)
         
         # Check if path is a directory or a file
         if os.path.isdir(args.path):
-            if args.show_composites:
+            if args.show_composites or args.init_tsv or args.make_excel:
                 processor = ImageProcessor(
                     folder_path=args.path,
                     config=config,
                     init_only=True
                 )
-                processor.show_composites()
-            elif args.init_tsv:
-                processor = ImageProcessor(
-                    folder_path=args.path,
-                    config=config,
-                    init_only=True
-                )
-                processor.init_tsv()
+                if args.show_composites:
+                    processor.show_composites()
+                if args.init_tsv:
+                    processor.init_tsv()
+                if args.make_excel:
+                    processor.make_excel()
             else:
                 # Process folder
                 processor = ImageProcessor(
@@ -1144,6 +1189,9 @@ class CLI:
                 sys.exit(1)
             if args.show_composites:
                 print("Error: --show-composites is only supported for folder mode.", file=sys.stderr)
+                sys.exit(1)
+            if args.make_excel:
+                print("Error: --make-excel is only supported for folder mode.", file=sys.stderr)
                 sys.exit(1)
             # Process single image
             CLI.process_single_image(
