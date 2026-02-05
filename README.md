@@ -15,7 +15,7 @@ GID is a Python tool for automatically generating human-readable descriptions of
   - Optionally copies images to a "Described" subfolder with descriptive filenames (folder mode)
 - **Progress Tracking**: Shows processing progress as you go
 - **Resumable**: Can be stopped and restarted without duplicating work
-- **Composite Support**: Describe multi-image composites as a single unit with a dedicated TSV row
+- **Composite Support**: Automatically detect multi-image composites by filename and describe them as a single unit
 
 ## Installation
 
@@ -107,6 +107,7 @@ options:
   -l LENGTH, --length LENGTH
                         Max tokens (default=4000).
   --init-tsv            Generate TSV with hashes and empty descriptions/context (folder mode only).
+  --no-composites       Disable automatic composite detection (process all images individually).
   --show-composites     List discovered composite sets and their matching files (folder mode only).
   -n, --no-copy         If provided, do NOT copy files to the output folder (folder mode only).
   -k API_KEY, --api-key API_KEY
@@ -214,7 +215,7 @@ The script generates a tab-separated values (TSV) file with the following column
 2. **ShortDescription**: A short description suitable for filenames (10 words or less)
 3. **LongDescription**: A detailed description of the image content
 4. **Context**: Optional per-image facts provided by a user to improve descriptions
-5. **Composite**: `yes` or `no` (case-insensitive). If `yes`, this row represents a composite image set.
+5. **Composite**: `yes` or `no` (case-insensitive). If `yes`, this row represents a composite image set (auto-detected by filename unless `--no-composites` is used).
 6. **SHA1**: A SHA-1 hash of the image file for deduplication
 
 ### Initialize a TSV for Context
@@ -225,15 +226,16 @@ To create a TSV with hashes and empty description fields (so someone can fill in
 python gid.py /path/to/images --init-tsv
 ```
 
-This does not call the API or copy any files. Then add per-image context in the **Context** column and rerun the tool normally. If **ShortDescription** or **LongDescription** is empty, GID will generate descriptions for that row and append the context to the prompt as additional image facts. The **Composite** column defaults to `no` unless you change it.
+This does not call the API or copy any files. Then add per-image context in the **Context** column and rerun the tool normally. If **ShortDescription** or **LongDescription** is empty, GID will generate descriptions for that row and append the context to the prompt as additional image facts. The **Composite** column is set to `yes` for detected composite rows and `no` for single-image rows.
+If composite detection is enabled (default), `--init-tsv` will add composite rows based on the `base_<number>.<ext>` filename pattern. Use `--no-composites` to disable this behavior.
 
 ### Composite Images
 
 To describe multiple related images as a single composite:
 
-1. Add a new row whose **OriginalFilename** is the shared base name (for example, `sina`).
-2. Set **Composite** to `yes`.
-3. Ensure the actual files are named like `sina_1.jpg`, `sina_2.jpg`, `sina_3.jpg`, etc.
+1. Name the files using the `base_<number>.<ext>` pattern (for example, `sina_1.jpg`, `sina_2.jpg`, `sina_3.jpg`).
+2. (Optional) Run `--init-tsv` to generate a composite row, then add any shared **Context** to that row.
+3. Run GID normally. It will detect composites automatically unless `--no-composites` is set.
 
 When GID runs, it will find all matching `base_<number>.<ext>` files, send them together in one request, and save the composite description on the composite row. Component rows are skipped during processing. The composite row's **SHA1** is computed from the ordered list of component filenames + hashes, so changing any component triggers a reprocess.
 

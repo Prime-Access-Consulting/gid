@@ -37,6 +37,7 @@ python gid.py /path/to/images --verbose
 - `-t`, `--temperature`: sampling temperature
 - `-l`, `--length`: max tokens (mapped to `max_output_tokens`)
 - `--init-tsv`: generate TSV with hashes and empty descriptions/context (folder mode only, no API calls)
+- `--no-composites`: disable automatic composite detection
 - `--show-composites`: list detected composite sets and their matching files (folder mode only)
 - `-n`, `--no-copy`: skip copying in folder mode
 - `-w`, `--workers`: max worker threads (folder mode)
@@ -62,9 +63,9 @@ Note: the CLI help text lists defaults (1.0, 4000, gpt-5.2), but the actual valu
   - If `ShortDescription` or `LongDescription` is empty for a hash, it will be reprocessed to fill in descriptions.
   - Copies images into `Described/` by default; `--no-copy` keeps everything in the source folder.
   - Short description is sanitized for filename safety; collisions are resolved with `" 2"`, `" 3"`, ... up to 100.
-  - If `Composite` is `yes` (case-insensitive), the row represents a composite set:
-    - `OriginalFilename` should be the base name (e.g., `sina`).
-    - Matching files are `sina_1.jpg`, `sina_2.jpg`, etc. (any image extension).
+  - Composite detection is automatic (disable with `--no-composites`):
+    - Files named like `base_<number>.<ext>` are grouped into one composite set.
+    - The composite row uses `OriginalFilename` as the base name (e.g., `sina`).
     - All composite files are sent together in one request; component rows are skipped.
     - The composite row's SHA-1 is computed from ordered filenames + file hashes, so changes reprocess.
 - **Single image mode** (path is a file):

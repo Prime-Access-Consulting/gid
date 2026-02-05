@@ -70,6 +70,7 @@ class Config:
         },
         "processing": {
             "no_copy": False,
+            "no_composites": False,
             "max_workers": None,
             "verbose": False
         },
@@ -512,6 +513,7 @@ class ImageProcessor:
         self.temperature = config["parameters"]["temperature"]
         self.max_tokens = config["parameters"]["max_tokens"]
         self.no_copy = config["processing"]["no_copy"]
+        self.no_composites = config["processing"].get("no_composites", False)
         self.max_workers = config["processing"]["max_workers"]
         self.verbose = config["processing"]["verbose"]
         self.output_folder_name = config["output"]["output_folder_name"]
@@ -594,24 +596,45 @@ class ImageProcessor:
             context=context
         )
 
-    def _find_composite_files(self, base_name: str) -> List[Tuple[int, str, str, str]]:
-        """Find composite files matching base-name-N.ext pattern."""
+    @staticmethod
+    def _normalize_base_name(name: str) -> str:
+        """Normalize a composite base name for matching."""
+        return Path(name).stem.lower()
+
+    def _discover_composite_sets(self) -> List[Tuple[str, List[Tuple[int, str, str, str]]]]:
+        """Discover composite sets based on underscore-numbered filenames."""
         pattern = re.compile(
-            rf"^{re.escape(base_name)}_(\d+)\.([A-Za-z0-9]+)$",
+            r"^(?P<base>.+)_(?P<index>\d+)\.([A-Za-z0-9]+)$",
             re.IGNORECASE
         )
-        matches = []
+        grouped: Dict[str, Dict[str, Any]] = {}
         for filename in os.listdir(self.folder_path):
             if not filename.lower().endswith(VALID_EXTENSIONS):
                 continue
             match = pattern.match(filename)
-            if match:
-                index = int(match.group(1))
-                image_path = os.path.join(self.folder_path, filename)
-                file_hash = FileHelper.hash_file(image_path)
-                matches.append((index, filename, image_path, file_hash))
-        matches.sort(key=lambda item: item[0])
-        return matches
+            if not match:
+                continue
+            base = match.group("base")
+            index = int(match.group("index"))
+            image_path = os.path.join(self.folder_path, filename)
+            file_hash = FileHelper.hash_file(image_path)
+            base_key = base.lower()
+            group = grouped.get(base_key)
+            if group is None:
+                group = {"base": base, "files": []}
+                grouped[base_key] = group
+            group["files"].append((index, filename, image_path, file_hash))
+
+        composite_sets: List[Tuple[str, List[Tuple[int, str, str, str]]]] = []
+        for group in grouped.values():
+            files = group["files"]
+            if not files:
+                continue
+            files.sort(key=lambda item: item[0])
+            composite_sets.append((group["base"], files))
+
+        composite_sets.sort(key=lambda item: item[0].lower())
+        return composite_sets
 
     @staticmethod
     def _compute_composite_hash(files: List[Tuple[int, str, str, str]]) -> str:
@@ -625,24 +648,52 @@ class ImageProcessor:
         self
     ) -> Tuple[List[Tuple[TSVEntry, List[Tuple[int, str, str, str]], str]], Set[str]]:
         """Collect composite tasks and the filenames they cover."""
+        if self.no_composites:
+            return [], set()
+
         tasks = []
         skip_filenames: Set[str] = set()
-        for entry in self.tsv_handler.get_composite_entries():
-            base_name = Path(entry.original_filename).stem
-            if not base_name:
-                continue
-            matches = self._find_composite_files(base_name)
-            if not matches:
-                logger.warning(f"No composite files found for base name '{base_name}'.")
-                continue
-            for _index, filename, _path, _file_hash in matches:
+        composite_sets = self._discover_composite_sets()
+        composite_entries = self.tsv_handler.get_composite_entries()
+        entry_by_base = {
+            self._normalize_base_name(entry.original_filename): entry
+            for entry in composite_entries
+        }
+        discovered_bases: Set[str] = set()
+
+        for base_name, files in composite_sets:
+            base_key = base_name.lower()
+            discovered_bases.add(base_key)
+            entry = entry_by_base.get(base_key)
+            if entry is None:
+                entry = TSVEntry(
+                    original_filename=base_name,
+                    short_desc="",
+                    long_desc="",
+                    context="",
+                    composite=True,
+                    file_hash=""
+                )
+                self.tsv_handler.entries.append(entry)
+            else:
+                entry.composite = True
+
+            for _index, filename, _path, _file_hash in files:
                 skip_filenames.add(filename.lower())
-            composite_hash = self._compute_composite_hash(matches)
+
+            composite_hash = self._compute_composite_hash(files)
             previous_hash = entry.file_hash
             self.tsv_handler.update_entry_hash(entry, composite_hash)
             if entry.short_desc and entry.long_desc and previous_hash == composite_hash:
                 continue
-            tasks.append((entry, matches, composite_hash))
+            tasks.append((entry, files, composite_hash))
+
+        for entry in composite_entries:
+            base_key = self._normalize_base_name(entry.original_filename)
+            if base_key not in discovered_bases:
+                base_name = Path(entry.original_filename).stem
+                logger.warning(f"No composite files found for base name '{base_name}'.")
+
         return tasks, skip_filenames
 
     def process_composite_task(
@@ -666,21 +717,19 @@ class ImageProcessor:
         )
 
     def discover_composites(self) -> List[Tuple[str, List[str]]]:
-        """Discover composite sets based on TSV composite rows."""
+        """Discover composite sets based on underscore-numbered filenames."""
         composites: List[Tuple[str, List[str]]] = []
-        for entry in self.tsv_handler.get_composite_entries():
-            base_name = Path(entry.original_filename).stem
-            if not base_name:
-                continue
-            matches = self._find_composite_files(base_name)
-            if not matches:
-                logger.warning(f"No composite files found for base name '{base_name}'.")
-                continue
-            composites.append((base_name, [filename for _index, filename, _path, _hash in matches]))
+        if self.no_composites:
+            return composites
+        for base_name, files in self._discover_composite_sets():
+            composites.append((base_name, [filename for _index, filename, _path, _hash in files]))
         return composites
 
     def show_composites(self) -> None:
         """Print composite base names and their matching files."""
+        if self.no_composites:
+            logger.info("Composite detection is disabled.")
+            return
         composites = self.discover_composites()
         if not composites:
             logger.info("No composites found.")
@@ -814,8 +863,26 @@ class ImageProcessor:
         self.tsv_handler.entries_by_hash.clear()
 
         total_count = 0
+        skip_filenames: Set[str] = set()
+        if not self.no_composites:
+            for base_name, files in self._discover_composite_sets():
+                for _index, filename, _path, _file_hash in files:
+                    skip_filenames.add(filename.lower())
+                composite_hash = self._compute_composite_hash(files)
+                total_count += 1
+                self.tsv_handler.upsert_entry(
+                    orig_filename=base_name,
+                    short_desc="",
+                    long_desc="",
+                    context="",
+                    file_hash=composite_hash,
+                    composite=True
+                )
+
         for filename in all_files:
             if not filename.lower().endswith(VALID_EXTENSIONS):
+                continue
+            if filename.lower() in skip_filenames:
                 continue
             image_path = os.path.join(self.folder_path, filename)
             file_hash = FileHelper.hash_file(image_path)
@@ -835,7 +902,7 @@ class ImageProcessor:
             logger.info("No images found to initialize.")
             return
         self.tsv_handler.write_all()
-        logger.info(f"Initialized TSV for {total_count} images.")
+        logger.info(f"Initialized TSV for {total_count} rows.")
 
 
 class CLI:
@@ -888,7 +955,12 @@ class CLI:
         parser.add_argument(
             "--init-tsv",
             action="store_true",
-            help="Generate TSV with hashes and empty descriptions/context (folder mode only)."
+            help="Generate TSV with hashes and empty descriptions/context (folder mode only; composites auto-detected unless --no-composites)."
+        )
+        parser.add_argument(
+            "--no-composites",
+            action="store_true",
+            help="Disable automatic composite detection (process all images individually)."
         )
         parser.add_argument(
             "--show-composites",
@@ -925,6 +997,8 @@ class CLI:
             config["parameters"]["max_tokens"] = args.length
         if args.no_copy:
             config["processing"]["no_copy"] = True
+        if args.no_composites:
+            config["processing"]["no_composites"] = True
         if args.workers is not None:
             config["processing"]["max_workers"] = args.workers
         if args.verbose:
