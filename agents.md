@@ -65,6 +65,7 @@ Note: the CLI help text lists defaults (1.0, 4000, gpt-5.2), but the actual valu
   - Short description is sanitized for filename safety; collisions are resolved with `" 2"`, `" 3"`, ... up to 100.
   - Composite detection is automatic (disable with `--no-composites`):
     - Files named like `base_<number>.<ext>` are grouped into one composite set.
+    - If `base.<ext>` exists, it is included in the composite set automatically.
     - The composite row uses `OriginalFilename` as the base name (e.g., `sina`).
     - All composite files are sent together in one request; component rows are skipped.
     - The composite row's SHA-1 is computed from ordered filenames + file hashes, so changes reprocess.

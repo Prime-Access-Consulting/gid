@@ -638,9 +638,16 @@ class ImageProcessor:
             re.IGNORECASE
         )
         grouped: Dict[str, Dict[str, Any]] = {}
-        for filename in os.listdir(self.folder_path):
-            if not filename.lower().endswith(VALID_EXTENSIONS):
-                continue
+        all_filenames = [
+            filename
+            for filename in os.listdir(self.folder_path)
+            if filename.lower().endswith(VALID_EXTENSIONS)
+        ]
+        filename_lookup: Dict[str, str] = {}
+        for filename in all_filenames:
+            lower = filename.lower()
+            if lower not in filename_lookup:
+                filename_lookup[lower] = filename
             match = pattern.match(filename)
             if not match:
                 continue
@@ -660,7 +667,17 @@ class ImageProcessor:
             files = group["files"]
             if not files:
                 continue
-            files.sort(key=lambda item: item[0])
+            base = group["base"]
+            base_lower = base.lower()
+            for ext in VALID_EXTENSIONS:
+                candidate_lower = f"{base_lower}{ext}"
+                actual = filename_lookup.get(candidate_lower)
+                if not actual:
+                    continue
+                image_path = os.path.join(self.folder_path, actual)
+                file_hash = FileHelper.hash_file(image_path)
+                files.append((-1, actual, image_path, file_hash))
+            files.sort(key=lambda item: (item[0], item[1].lower()))
             composite_sets.append((group["base"], files))
 
         composite_sets.sort(key=lambda item: item[0].lower())

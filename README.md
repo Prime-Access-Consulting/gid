@@ -242,10 +242,11 @@ If composite detection is enabled (default), `--init-tsv` will add composite row
 To describe multiple related images as a single composite:
 
 1. Name the files using the `base_<number>.<ext>` pattern (for example, `sina_1.jpg`, `sina_2.jpg`, `sina_3.jpg`).
-2. (Optional) Run `--init-tsv` to generate a composite row, then add any shared **Context** to that row.
-3. Run GID normally. It will detect composites automatically unless `--no-composites` is set.
+2. (Optional) If you also have a `base.<ext>` file (for example, `sina.jpg`), it will be included in the composite set automatically.
+3. (Optional) Run `--init-tsv` to generate a composite row, then add any shared **Context** to that row.
+4. Run GID normally. It will detect composites automatically unless `--no-composites` is set.
 
-When GID runs, it will find all matching `base_<number>.<ext>` files, send them together in one request, and save the composite description on the composite row. Component rows are skipped during processing. The composite row's **SHA1** is computed from the ordered list of component filenames + hashes, so changing any component triggers a reprocess.
+When GID runs, it will find all matching `base_<number>.<ext>` files (plus `base.<ext>` if present), send them together in one request, and save the composite description on the composite row. Component rows are skipped during processing. The composite row's **SHA1** is computed from the ordered list of component filenames + hashes, so changing any component triggers a reprocess.
 
 ### Described Folder
 
