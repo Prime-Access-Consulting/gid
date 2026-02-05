@@ -51,7 +51,7 @@ GID is a Python tool for automatically generating human-readable descriptions of
    $env:OPENAI_API_KEY="your_api_key_here"
    ```
    
-   b. Using config.json in the current directory:
+   b. Using config.json in the current directory (copy `config.json.sample` to `config.json` and edit):
    ```json
    {
      "api": {
@@ -116,7 +116,7 @@ options:
                         Maximum number of concurrent workers (folder mode only).
   -v, --verbose         Enable verbose output including HTTP requests.
   -c CONFIG, --config CONFIG
-                        Path to the configuration file (default: config.json in the current directory or ~/.config/gid/config.json)
+                        Path to the configuration file (default: config.json in the target folder, current directory, or ~/.config/gid/config.json)
   -m MODEL, --model MODEL
                         OpenAI model to use (default: gpt-5.2)
 ```
@@ -163,9 +163,12 @@ python gid.py /path/to/images --config /path/to/my-config.json
 ### Configuration File
 
 You can use a JSON configuration file to customize GID's behavior. The config file can be placed in one of these locations:
+- `config.json` in the folder you are describing
 - `config.json` in the current directory
 - `~/.config/gid/config.json` in your home directory
 - Any custom path specified with the `--config` flag
+
+A sample configuration file is provided as `config.json.sample`.
 
 The configuration file supports the following settings:
 
@@ -181,6 +184,7 @@ The configuration file supports the following settings:
   },
   "processing": {
     "no_copy": false,      // Whether to skip copying files
+    "no_composites": false,// Disable automatic composite detection
     "max_workers": null,   // Max concurrent workers (null = auto)
     "verbose": false       // Enable verbose logging
   },
@@ -190,12 +194,16 @@ The configuration file supports the following settings:
   },
   "prompt": {
     "system_prompt": "...", // Custom prompt template
+    "single_image_prompt": "Describe the following image.",
+    "composite_image_prompt": "Describe the following images together as a single composite.",
+    "context_template": "Additional image facts provided by the user (treat as true): {context}",
     "short_description_max_words": 10   // Max words in short description
   }
 }
 ```
 
 Command-line arguments will override settings in the configuration file.
+Use `{context}` in `context_template`; it will be replaced with the row's **Context** value.
 
 ### Prompt Output Format
 

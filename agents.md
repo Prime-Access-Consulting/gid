@@ -5,7 +5,7 @@ Generate short and long textual descriptions for images using the OpenAI API. Th
 
 ## Repository Layout
 - `gid.py`: single entry point, all logic lives here
-- `config.json`: repo default config (overrides code defaults when present)
+- `config.json.sample`: sample config (copy to `config.json` to override defaults)
 - `requirements.txt`: depends on `openai>=1.0.0`
 - `README.md`: user-facing docs
 
@@ -47,8 +47,8 @@ python gid.py /path/to/images --verbose
 ## Configuration Resolution
 1. Start from `Config.DEFAULT_CONFIG` in `gid.py` (model `gpt-5.2`, temperature `1.0`, max tokens `4000`).
 2. If a config file exists, deep-merge it:
-   - `config.json` in the current directory, else `~/.config/gid/config.json`
-   - The repo includes `config.json`, which currently matches the defaults but still overrides.
+   - `config.json` in the folder being described, else current directory, else `~/.config/gid/config.json`
+   - The repo includes `config.json.sample` as a starting point.
 3. CLI flags override config values.
 4. `OPENAI_API_KEY` is used only if no API key was provided by file or CLI.
 Note: the CLI help text lists defaults (1.0, 4000, gpt-5.2), but the actual values come from the config resolution above.

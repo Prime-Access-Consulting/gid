@@ -88,6 +88,9 @@ class Config:
             SHORT: <short description>
             LONG: <long description>
             """,
+            "single_image_prompt": "Describe the following image.",
+            "composite_image_prompt": "Describe the following images together as a single composite.",
+            "context_template": "Additional image facts provided by the user (treat as true): {context}",
             "short_description_max_words": 10
         }
     }
@@ -390,6 +393,9 @@ class ImageDescriber:
         temperature: float = 1.0,
         max_tokens: int = 4000,
         system_prompt: Optional[str] = None,
+        single_image_prompt: Optional[str] = None,
+        composite_image_prompt: Optional[str] = None,
+        context_template: Optional[str] = None,
         short_description_max_words: Optional[int] = None
     ):
         self.api_key = api_key
@@ -397,7 +403,23 @@ class ImageDescriber:
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.client = OpenAI(api_key=api_key)
-        self.system_prompt = system_prompt or Config.DEFAULT_CONFIG["prompt"]["system_prompt"]
+        default_prompt = Config.DEFAULT_CONFIG["prompt"]
+        self.system_prompt = system_prompt if system_prompt is not None else default_prompt["system_prompt"]
+        self.single_image_prompt = (
+            single_image_prompt
+            if single_image_prompt is not None
+            else default_prompt["single_image_prompt"]
+        )
+        self.composite_image_prompt = (
+            composite_image_prompt
+            if composite_image_prompt is not None
+            else default_prompt["composite_image_prompt"]
+        )
+        self.context_template = (
+            context_template
+            if context_template is not None
+            else default_prompt["context_template"]
+        )
         self.short_description_max_words = short_description_max_words
     
     def _limit_short_description(self, short_desc: str) -> str:
@@ -421,9 +443,9 @@ class ImageDescriber:
         """
         try:
             content = []
-            prompt_text = "Describe the following image."
+            prompt_text = self.single_image_prompt
             if len(image_paths) > 1:
-                prompt_text = "Describe the following images together as a single composite."
+                prompt_text = self.composite_image_prompt
             content.append({"type": "input_text", "text": prompt_text})
             for image_path in image_paths:
                 encoded_image = FileHelper.encode_image(image_path)
@@ -433,11 +455,13 @@ class ImageDescriber:
 
             instructions = self.system_prompt
             if context.strip():
-                instructions = (
-                    f"{instructions.strip()}\n\n"
-                    "Additional image facts provided by the user (treat as true): "
-                    f"{context.strip()}"
-                )
+                context_value = context.strip()
+                template = self.context_template or ""
+                if "{context}" in template:
+                    context_text = template.replace("{context}", context_value)
+                else:
+                    context_text = f"{template} {context_value}".strip() if template else context_value
+                instructions = f"{instructions.strip()}\n\n{context_text}"
 
             response_params = {
                 "model": self.model,
@@ -519,6 +543,9 @@ class ImageProcessor:
         self.output_folder_name = config["output"]["output_folder_name"]
         self.tsv_filename = config["output"]["tsv_filename"]
         self.system_prompt = config["prompt"]["system_prompt"]
+        self.single_image_prompt = config["prompt"].get("single_image_prompt")
+        self.composite_image_prompt = config["prompt"].get("composite_image_prompt")
+        self.context_template = config["prompt"].get("context_template")
         self.short_description_max_words = config["prompt"].get("short_description_max_words")
         
         self.described_folder_path = FileHelper.ensure_described_folder(folder_path, self.output_folder_name, self.no_copy)
@@ -532,6 +559,9 @@ class ImageProcessor:
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
                 system_prompt=self.system_prompt,
+                single_image_prompt=self.single_image_prompt,
+                composite_image_prompt=self.composite_image_prompt,
+                context_template=self.context_template,
                 short_description_max_words=self.short_description_max_words
             )
         self.progress_lock = Lock()
@@ -950,7 +980,7 @@ class CLI:
         parser.add_argument(
             "-c", "--config",
             type=str,
-            help="Path to the configuration file (default: config.json in the current directory or ~/.config/gid/config.json)"
+            help="Path to the configuration file (default: config.json in the target folder, current directory, or ~/.config/gid/config.json)"
         )
         parser.add_argument(
             "--init-tsv",
@@ -984,7 +1014,18 @@ class CLI:
     def get_config(args: argparse.Namespace) -> Dict[str, Any]:
         """Load config from file and override with command line args."""
         # Load config from file
-        config = Config.load_config(args.config)
+        config_path = args.config
+        if not config_path and args.path:
+            target_dir = None
+            if os.path.isdir(args.path):
+                target_dir = args.path
+            elif os.path.isfile(args.path):
+                target_dir = os.path.dirname(args.path)
+            if target_dir:
+                candidate = os.path.join(target_dir, "config.json")
+                if os.path.exists(candidate):
+                    config_path = candidate
+        config = Config.load_config(config_path)
         
         # Override with command line args
         if args.api_key:
@@ -1024,6 +1065,9 @@ class CLI:
             temperature=config["parameters"]["temperature"],
             max_tokens=config["parameters"]["max_tokens"],
             system_prompt=config["prompt"]["system_prompt"],
+            single_image_prompt=config["prompt"].get("single_image_prompt"),
+            composite_image_prompt=config["prompt"].get("composite_image_prompt"),
+            context_template=config["prompt"].get("context_template"),
             short_description_max_words=config["prompt"].get("short_description_max_words")
         )
         
