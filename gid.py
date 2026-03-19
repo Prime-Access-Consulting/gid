@@ -37,9 +37,13 @@ import json
 from pathlib import Path
 from typing import Tuple, List, Dict, Optional, Any, Set
 from dataclasses import dataclass
-from openai import OpenAI
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
+
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
 
 # Configure logging - simple output with just the message
 logging.basicConfig(
@@ -431,6 +435,11 @@ class ImageDescriber:
         context_template: Optional[str] = None,
         short_description_max_words: Optional[int] = None
     ):
+        if OpenAI is None:
+            raise ImportError(
+                "The openai package is required for image description. "
+                "Install it with: pip install openai"
+            )
         self.api_key = api_key
         self.model = model
         self.temperature = temperature
@@ -673,8 +682,35 @@ class ImageProcessor:
         """Normalize a composite base name for matching."""
         return cls._strip_image_extension(name).lower()
 
+    @staticmethod
+    def _looks_like_composite_sequence(indexes: List[int], has_base_image: bool = False) -> bool:
+        """
+        Require composite parts to look like an intentional numbered sequence.
+
+        This avoids treating camera filenames such as IMG_3392.jpeg as composite
+        parts just because they end with an underscore and digits.
+        """
+        if not indexes:
+            return False
+
+        unique_indexes = sorted(set(indexes))
+        if len(unique_indexes) != len(indexes):
+            return False
+
+        if unique_indexes[0] == 1:
+            if len(unique_indexes) >= 2 and unique_indexes == list(range(1, len(unique_indexes) + 1)):
+                return True
+            return has_base_image and unique_indexes == [1]
+
+        if unique_indexes[0] == 0:
+            if len(unique_indexes) >= 2 and unique_indexes == list(range(len(unique_indexes))):
+                return True
+            return has_base_image and unique_indexes == [0]
+
+        return False
+
     def _discover_composite_sets(self) -> List[Tuple[str, List[Tuple[int, str, str, str]]]]:
-        """Discover composite sets based on underscore-numbered filenames."""
+        """Discover composite sets from sequential underscore-numbered filenames."""
         pattern = re.compile(
             r"^(?P<base>.+)_(?P<index>\d+)\.([A-Za-z0-9]+)$",
             re.IGNORECASE
@@ -706,11 +742,12 @@ class ImageProcessor:
 
         composite_sets: List[Tuple[str, List[Tuple[int, str, str, str]]]] = []
         for group in grouped.values():
-            files = group["files"]
-            if not files:
+            indexed_files = list(group["files"])
+            if not indexed_files:
                 continue
             base = group["base"]
             base_lower = base.lower()
+            base_file: Optional[Tuple[int, str, str, str]] = None
             for ext in VALID_EXTENSIONS:
                 candidate_lower = f"{base_lower}{ext}"
                 actual = filename_lookup.get(candidate_lower)
@@ -718,7 +755,16 @@ class ImageProcessor:
                     continue
                 image_path = os.path.join(self.folder_path, actual)
                 file_hash = FileHelper.hash_file(image_path)
-                files.append((-1, actual, image_path, file_hash))
+                base_file = (-1, actual, image_path, file_hash)
+                break
+
+            indexes = [index for index, _filename, _path, _file_hash in indexed_files]
+            if not self._looks_like_composite_sequence(indexes, has_base_image=base_file is not None):
+                continue
+
+            files = list(indexed_files)
+            if base_file is not None:
+                files.append(base_file)
             files.sort(key=lambda item: (item[0], item[1].lower()))
             composite_sets.append((group["base"], files))
 
@@ -822,7 +868,7 @@ class ImageProcessor:
         )
 
     def discover_composites(self) -> List[Tuple[str, List[str]]]:
-        """Discover composite sets based on underscore-numbered filenames."""
+        """Discover composite sets from sequential underscore-numbered filenames."""
         composites: List[Tuple[str, List[str]]] = []
         if self.no_composites:
             return composites
