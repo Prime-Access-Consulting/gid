@@ -96,8 +96,8 @@ class Config:
         },
         "processing": {
             "no_copy": False,
-            "no_composites": False,
-            "max_workers": None,
+            "no_composites": True,
+            "max_workers": 0,
             "verbose": False
         },
         "output": {
@@ -269,6 +269,17 @@ class Config:
             valid_values = ", ".join(REASONING_EFFORT_VALUES)
             raise ValueError(f"parameters.reasoning_effort must be one of: {valid_values}.")
         return normalized
+
+    @staticmethod
+    def normalize_max_workers(max_workers: Any) -> Optional[int]:
+        """Validate worker count. Zero means use ThreadPoolExecutor's default."""
+        if max_workers is None:
+            return None
+        if isinstance(max_workers, bool) or not isinstance(max_workers, int):
+            raise ValueError("processing.max_workers must be an integer.")
+        if max_workers < 0:
+            raise ValueError("processing.max_workers must be 0 for auto or at least 1.")
+        return None if max_workers == 0 else max_workers
 
 
 @dataclass
@@ -759,8 +770,8 @@ class ImageProcessor:
             config["parameters"].get("reasoning_effort")
         )
         self.no_copy = config["processing"]["no_copy"]
-        self.no_composites = config["processing"].get("no_composites", False)
-        self.max_workers = config["processing"]["max_workers"]
+        self.no_composites = config["processing"].get("no_composites", True)
+        self.max_workers = Config.normalize_max_workers(config["processing"]["max_workers"])
         self.verbose = config["processing"]["verbose"]
         self.output_folder_name = config["output"]["output_folder_name"]
         self.tsv_filename = config["output"]["tsv_filename"]
@@ -1363,7 +1374,7 @@ class CLI:
         parser.add_argument(
             "-w", "--workers",
             type=int,
-            help="Maximum number of concurrent workers (folder mode only)."
+            help="Maximum number of concurrent workers in folder mode (0=auto, default=0)."
         )
         parser.add_argument(
             "-v", "--verbose",
@@ -1378,7 +1389,7 @@ class CLI:
         parser.add_argument(
             "--init-tsv",
             action="store_true",
-            help="Generate TSV with hashes and empty descriptions/context (folder mode only; composites auto-detected unless --no-composites)."
+            help="Generate TSV with hashes and empty descriptions/context (folder mode only; use --composites to include composite rows)."
         )
         parser.add_argument(
             "--force-init-tsv",
@@ -1390,15 +1401,21 @@ class CLI:
             action="store_true",
             help="Generate an Excel .xlsx file from the existing TSV (folder mode only)."
         )
-        parser.add_argument(
+        composite_group = parser.add_mutually_exclusive_group()
+        composite_group.add_argument(
+            "--composites",
+            action="store_true",
+            help="Enable automatic composite detection (folder mode only)."
+        )
+        composite_group.add_argument(
             "--no-composites",
             action="store_true",
-            help="Disable automatic composite detection (process all images individually)."
+            help="Disable automatic composite detection (default; useful to override config)."
         )
         parser.add_argument(
             "--show-composites",
             action="store_true",
-            help="List discovered composite sets and their matching files (folder mode only)."
+            help="List discovered composite sets and their matching files (folder mode only; no API calls)."
         )
         parser.add_argument(
             "--write-sample-config",
@@ -1435,8 +1452,10 @@ class CLI:
             parser.error("--write-sample-config cannot be combined with folder no-API actions")
         if args.length is not None and args.length < 1:
             parser.error("--length must be at least 1")
-        if args.workers is not None and args.workers < 1:
-            parser.error("--workers must be at least 1")
+        if args.show_composites and args.no_composites:
+            parser.error("--show-composites cannot be combined with --no-composites")
+        if args.workers is not None and args.workers < 0:
+            parser.error("--workers must be 0 for auto or at least 1")
         if args.temperature is not None and args.temperature < 0:
             parser.error("--temperature must be non-negative")
         return args
@@ -1480,6 +1499,8 @@ class CLI:
             config["parameters"]["max_tokens"] = args.length
         if args.no_copy:
             config["processing"]["no_copy"] = True
+        if args.composites or args.show_composites:
+            config["processing"]["no_composites"] = False
         if args.no_composites:
             config["processing"]["no_composites"] = True
         if args.workers is not None:
@@ -1498,6 +1519,7 @@ class CLI:
             config["parameters"]["reasoning_effort"] = Config.normalize_reasoning_effort(
                 config["parameters"].get("reasoning_effort")
             )
+            Config.normalize_max_workers(config["processing"].get("max_workers"))
         except ValueError as e:
             print(f"Error: {str(e)}", file=sys.stderr)
             sys.exit(1)

@@ -10,8 +10,8 @@
   },
   "processing": {
     "no_copy": false,
-    "no_composites": false,
-    "max_workers": null,
+    "no_composites": true,
+    "max_workers": 0,
     "verbose": false
   },
   "output": {

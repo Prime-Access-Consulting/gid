@@ -29,6 +29,9 @@ python gid.py /path/to/images --model gpt-5.5
 # Select reasoning effort for supported reasoning models
 python gid.py /path/to/images --reasoning-effort high
 
+# Enable composite detection
+python gid.py /path/to/images --composites
+
 # Verbose logging (OpenAI + HTTPX request logs)
 python gid.py /path/to/images --verbose
 ```
@@ -43,16 +46,17 @@ python gid.py /path/to/images --verbose
 - `--init-tsv`: generate TSV with hashes and empty descriptions/context (folder mode only, no API calls)
 - `--force-init-tsv`: reset the TSV during `--init-tsv` instead of preserving existing rows/context
 - `--make-excel`: generate an Excel .xlsx from the existing TSV (folder mode only, no API calls)
-- `--no-composites`: disable automatic composite detection
-- `--show-composites`: list detected composite sets and their matching files (folder mode only)
+- `--composites`: enable automatic composite detection (off by default)
+- `--no-composites`: disable automatic composite detection (default; useful to override config)
+- `--show-composites`: list detected composite sets and their matching files (folder mode only, no API calls)
 - `--write-sample-config [PATH]`: write built-in defaults to a sample config file and exit (default `config.json.sample`)
 - `-n`, `--no-copy`: skip copying in folder mode
-- `-w`, `--workers`: max worker threads (folder mode)
+- `-w`, `--workers`: max worker threads in folder mode (`0` = auto)
 - `-v`, `--verbose`: enable OpenAI + HTTPX request logs
 - `-c`, `--config`: path to config file
 
 ## Configuration Resolution
-1. Start from `Config.DEFAULT_CONFIG` in `gid.py`, which defines the real defaults (model `gpt-5.5`; temperature `1.0`; max tokens `4000`; reasoning effort `medium`; prompt text).
+1. Start from `Config.DEFAULT_CONFIG` in `gid.py`, which defines the real defaults (model `gpt-5.5`; temperature `1.0`; max tokens `4000`; reasoning effort `medium`; composites disabled; max workers `0`; prompt text).
 2. If a user config file exists, deep-merge it over the code defaults:
    - `config.json` in the folder being described, else current directory, else `~/.config/gid/config.json`
 3. CLI flags override config values.
@@ -70,7 +74,7 @@ Note: local `config.json` should contain only values that need overriding. `conf
   - `--init-tsv` preserves existing matching rows by default; if content changes under the same filename/base, it preserves context but clears descriptions. `--force-init-tsv` resets rows.
   - Copies images into `Described/` by default; `--no-copy` keeps everything in the source folder.
   - Short description is sanitized for filename safety; collisions are resolved with `" 2"`, `" 3"`, ... up to 100.
-  - Composite detection is automatic (disable with `--no-composites`):
+  - Composite detection is disabled by default (enable with `--composites`):
     - Files named like `base_<number>.<ext>` are grouped into one composite set.
     - If `base.<ext>` exists, it is included in the composite set automatically.
     - The composite row uses `OriginalFilename` with an extension (e.g., `sina.jpg`).

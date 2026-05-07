@@ -15,7 +15,7 @@ GID is a Python tool for automatically generating human-readable descriptions of
   - Optionally copies images to a "Described" subfolder with descriptive filenames (folder mode)
 - **Progress Tracking**: Shows processing progress as you go
 - **Resumable**: Can be stopped and restarted without duplicating work
-- **Composite Support**: Automatically detect multi-image composites by filename and describe them as a single unit
+- **Optional Composite Support**: Detect multi-image composites by filename and describe them as a single unit when explicitly enabled
 
 ## Installation
 
@@ -88,7 +88,7 @@ This will:
 ```
 usage: gid.py [-h] [-t TEMPERATURE] [-l LENGTH] [-n] [-k API_KEY] [-w WORKERS]
               [-v] [-c CONFIG] [--init-tsv] [--force-init-tsv] [--make-excel]
-              [--no-composites] [--show-composites]
+              [--composites | --no-composites] [--show-composites]
               [--write-sample-config [PATH]] [-m MODEL]
               [--reasoning-effort {none,low,medium,high,xhigh}]
               [path]
@@ -105,15 +105,16 @@ options:
   -k, --api-key API_KEY
                         OpenAI API key (overrides config file and environment variable).
   -w, --workers WORKERS
-                        Maximum number of concurrent workers (folder mode only).
+                        Maximum number of concurrent workers in folder mode (0=auto, default=0).
   -v, --verbose         Enable verbose output including HTTP requests.
   -c, --config CONFIG
                         Path to the configuration file (default: config.json in the target folder, current directory, or ~/.config/gid/config.json)
-  --init-tsv            Generate TSV with hashes and empty descriptions/context (folder mode only; composites auto-detected unless --no-composites).
+  --init-tsv            Generate TSV with hashes and empty descriptions/context (folder mode only; use --composites to include composite rows).
   --force-init-tsv      Reset the TSV when using --init-tsv instead of preserving existing rows/context.
   --make-excel          Generate an Excel .xlsx file from the existing TSV (folder mode only).
-  --no-composites       Disable automatic composite detection (process all images individually).
-  --show-composites     List discovered composite sets and their matching files (folder mode only).
+  --composites          Enable automatic composite detection (folder mode only).
+  --no-composites       Disable automatic composite detection (default; useful to override config).
+  --show-composites     List discovered composite sets and their matching files (folder mode only; no API calls).
   --write-sample-config [PATH]
                         Write built-in defaults to a sample config file and exit (default: config.json.sample).
   -m, --model MODEL     OpenAI model ID to send to the API (default: gpt-5.5).
@@ -206,8 +207,8 @@ The configuration file supports the following settings:
   },
   "processing": {
     "no_copy": false,      // Whether to skip copying files
-    "no_composites": false,// Disable automatic composite detection
-    "max_workers": null,   // Max concurrent workers (null = auto)
+    "no_composites": true, // Disable automatic composite detection
+    "max_workers": 0,      // Max concurrent workers (0 = auto)
     "verbose": false       // Enable verbose logging
   },
   "output": {
@@ -248,7 +249,7 @@ The script generates a tab-separated values (TSV) file with the following column
 2. **ShortDescription**: A short description suitable for filenames, trimmed to `short_description_max_words`
 3. **LongDescription**: A detailed description of the image content
 4. **Context**: Optional per-image facts provided by a user to improve descriptions
-5. **Composite**: `yes` or `no` (case-insensitive). If `yes`, this row represents a composite image set (auto-detected by filename unless `--no-composites` is used).
+5. **Composite**: `yes` or `no` (case-insensitive). If `yes`, this row represents a composite image set (auto-detected by filename only when composites are enabled).
 6. **SHA1**: A SHA-1 hash of the image file for deduplication
 
 ### Excel Output
@@ -264,7 +265,7 @@ python gid.py /path/to/images --init-tsv
 ```
 
 This does not call the API or copy any files. Then add per-image context in the **Context** column and rerun the tool normally. If **ShortDescription** or **LongDescription** is empty, GID will generate descriptions for that row and append the context to the prompt as additional image facts. The **Composite** column is set to `yes` for detected composite rows and `no` for single-image rows.
-If composite detection is enabled (default), `--init-tsv` will add composite rows based on the `base_<number>.<ext>` filename pattern. Use `--no-composites` to disable this behavior.
+Composite detection is disabled by default. Use `--composites` with `--init-tsv` to add composite rows based on the `base_<number>.<ext>` filename pattern.
 By default, rerunning `--init-tsv` preserves existing rows, context, and descriptions when hashes still match. If a file's hash changes but the filename or composite base still matches, GID preserves the context and clears descriptions so the row will be regenerated. Use `--force-init-tsv` with `--init-tsv` to reset the TSV instead.
 
 ### Composite Images
@@ -273,8 +274,8 @@ To describe multiple related images as a single composite:
 
 1. Name the files using the `base_<number>.<ext>` pattern (for example, `sina_1.jpg`, `sina_2.jpg`, `sina_3.jpg`).
 2. (Optional) If you also have a `base.<ext>` file (for example, `sina.jpg`), it will be included in the composite set automatically.
-3. (Optional) Run `--init-tsv` to generate a composite row, then add any shared **Context** to that row.
-4. Run GID normally. It will detect composites automatically unless `--no-composites` is set.
+3. (Optional) Run `--init-tsv --composites` to generate a composite row, then add any shared **Context** to that row.
+4. Run GID with `--composites`.
 
 When GID runs, it will find all matching `base_<number>.<ext>` files (plus `base.<ext>` if present), send them together in one request, and save the composite description on the composite row. Component rows are skipped during processing. The composite row’s **OriginalFilename** includes an extension (for example, `base.jpg`) to preserve naming. The composite row's **SHA1** is computed from the ordered list of component filenames + hashes, so changing any component triggers a reprocess.
 
