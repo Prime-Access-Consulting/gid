@@ -24,7 +24,7 @@ python gid.py /path/to/images --temperature 0.8 --length 1000 --no-copy
 python gid.py /path/to/images --config /path/to/config.json
 
 # Select a different model
-python gid.py /path/to/images --model gpt-5.2
+python gid.py /path/to/images --model gpt-5.5
 
 # Verbose logging (OpenAI + HTTPX request logs)
 python gid.py /path/to/images --verbose
@@ -37,6 +37,7 @@ python gid.py /path/to/images --verbose
 - `-t`, `--temperature`: sampling temperature
 - `-l`, `--length`: max tokens (mapped to `max_output_tokens`)
 - `--init-tsv`: generate TSV with hashes and empty descriptions/context (folder mode only, no API calls)
+- `--force-init-tsv`: reset the TSV during `--init-tsv` instead of preserving existing rows/context
 - `--make-excel`: generate an Excel .xlsx from the existing TSV (folder mode only, no API calls)
 - `--no-composites`: disable automatic composite detection
 - `--show-composites`: list detected composite sets and their matching files (folder mode only)
@@ -46,13 +47,13 @@ python gid.py /path/to/images --verbose
 - `-c`, `--config`: path to config file
 
 ## Configuration Resolution
-1. Start from `Config.DEFAULT_CONFIG` in `gid.py` (model `gpt-5.2`, temperature `1.0`, max tokens `4000`).
+1. Start from `Config.DEFAULT_CONFIG` in `gid.py` (model `latest`, currently resolved to `gpt-5.5`; temperature `1.0`; max tokens `4000`).
 2. If a config file exists, deep-merge it:
    - `config.json` in the folder being described, else current directory, else `~/.config/gid/config.json`
    - The repo includes `config.json.sample` as a starting point.
 3. CLI flags override config values.
 4. `OPENAI_API_KEY` is used only if no API key was provided by file or CLI.
-Note: the CLI help text lists defaults (1.0, 4000, gpt-5.2), but the actual values come from the config resolution above.
+Note: the CLI help text lists code defaults, but actual values come from the config resolution above. Model aliases `latest`, `gpt-latest`, `gpt-5-latest`, and `5` currently resolve to `gpt-5.5`.
 
 ## Modes and Output
 - **Folder mode** (path is a directory):
@@ -62,6 +63,7 @@ Note: the CLI help text lists defaults (1.0, 4000, gpt-5.2), but the actual valu
     - `OriginalFilename`, `ShortDescription`, `LongDescription`, `Context`, `Composite`, `SHA1`
   - Uses SHA-1 hashes to skip files already present in the TSV and to skip duplicates within the same run.
   - If `ShortDescription` or `LongDescription` is empty for a hash, it will be reprocessed to fill in descriptions.
+  - `--init-tsv` preserves existing matching rows by default; if content changes under the same filename/base, it preserves context but clears descriptions. `--force-init-tsv` resets rows.
   - Copies images into `Described/` by default; `--no-copy` keeps everything in the source folder.
   - Short description is sanitized for filename safety; collisions are resolved with `" 2"`, `" 3"`, ... up to 100.
   - Composite detection is automatic (disable with `--no-composites`):

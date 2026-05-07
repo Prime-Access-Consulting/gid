@@ -1,6 +1,6 @@
 # GID - Generate Image Descriptions
 
-GID is a Python tool for automatically generating human-readable descriptions of images using OpenAI's GPT-5.2 model. It processes image files in a specified folder, creates both short and detailed descriptions, and optionally renames and copies the files based on their descriptions.
+GID is a Python tool for automatically generating human-readable descriptions of images using OpenAI's latest recommended GPT model. It processes image files in a specified folder, creates both short and detailed descriptions, and optionally renames and copies the files based on their descriptions.
 
 ## Features
 
@@ -22,7 +22,7 @@ GID is a Python tool for automatically generating human-readable descriptions of
 ### Prerequisites
 
 - Python 3.7+
-- OpenAI API key with access to GPT-5.2
+- OpenAI API key with access to GPT-5.5 or the current latest recommended model
 
 ### Setup
 
@@ -107,6 +107,7 @@ options:
   -l LENGTH, --length LENGTH
                         Max tokens (default=4000).
   --init-tsv            Generate TSV with hashes and empty descriptions/context (folder mode only).
+  --force-init-tsv      Reset the TSV when using --init-tsv instead of preserving existing rows/context.
   --make-excel          Generate an Excel .xlsx file from the existing TSV (folder mode only).
   --no-composites       Disable automatic composite detection (process all images individually).
   --show-composites     List discovered composite sets and their matching files (folder mode only).
@@ -119,7 +120,7 @@ options:
   -c CONFIG, --config CONFIG
                         Path to the configuration file (default: config.json in the target folder, current directory, or ~/.config/gid/config.json)
   -m MODEL, --model MODEL
-                        OpenAI model to use (default: gpt-5.2)
+                        OpenAI model to use (default: latest -> gpt-5.5)
 ```
 
 Temperature defaults to **1.0** unless you override it with `--temperature` or the config file.
@@ -182,7 +183,7 @@ The configuration file supports the following settings:
 {
   "api": {
     "api_key": "",         // Your OpenAI API key
-    "model": "gpt-5.2"     // OpenAI model to use
+    "model": "latest"      // OpenAI model to use (latest resolves to gpt-5.5)
   },
   "parameters": {
     "temperature": 1.0,    // Sampling temperature
@@ -210,6 +211,7 @@ The configuration file supports the following settings:
 
 Command-line arguments will override settings in the configuration file.
 Use `{context}` in `context_template`; it will be replaced with the row's **Context** value.
+The built-in model aliases `latest`, `gpt-latest`, `gpt-5-latest`, and `5` currently resolve to `gpt-5.5`.
 
 ### Prompt Output Format
 
@@ -246,6 +248,7 @@ python gid.py /path/to/images --init-tsv
 
 This does not call the API or copy any files. Then add per-image context in the **Context** column and rerun the tool normally. If **ShortDescription** or **LongDescription** is empty, GID will generate descriptions for that row and append the context to the prompt as additional image facts. The **Composite** column is set to `yes` for detected composite rows and `no` for single-image rows.
 If composite detection is enabled (default), `--init-tsv` will add composite rows based on the `base_<number>.<ext>` filename pattern. Use `--no-composites` to disable this behavior.
+By default, rerunning `--init-tsv` preserves existing rows, context, and descriptions when hashes still match. If a file's hash changes but the filename or composite base still matches, GID preserves the context and clears descriptions so the row will be regenerated. Use `--force-init-tsv` with `--init-tsv` to reset the TSV instead.
 
 ### Composite Images
 
@@ -274,4 +277,4 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## Acknowledgments
 
-This tool uses OpenAI's GPT-5.2 model to generate image descriptions.
+This tool uses OpenAI's latest recommended GPT model to generate image descriptions.

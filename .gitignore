@@ -63,3 +63,6 @@ Thumbs.db
 # Local image fixtures
 images/
 temp/
+
+# Local configuration with secrets
+config.json

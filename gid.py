@@ -34,6 +34,9 @@ import hashlib
 import argparse
 import logging
 import json
+import csv
+import copy
+import tempfile
 from pathlib import Path
 from typing import Tuple, List, Dict, Optional, Any, Set
 from dataclasses import dataclass
@@ -59,6 +62,23 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 # Valid image extensions
 VALID_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp")
 
+# GID's moving model alias. Update this when OpenAI recommends a newer default.
+LATEST_MODEL = "gpt-5.5"
+MODEL_ALIASES = {
+    "latest": LATEST_MODEL,
+    "gpt-latest": LATEST_MODEL,
+    "gpt-5-latest": LATEST_MODEL,
+    "5": LATEST_MODEL
+}
+
+
+def resolve_model_name(model_name: Optional[str]) -> str:
+    """Resolve GID model aliases to concrete OpenAI model IDs."""
+    name = (model_name or "").strip()
+    if not name:
+        return LATEST_MODEL
+    return MODEL_ALIASES.get(name.lower(), name)
+
 
 class Config:
     """Class to handle configuration from config.json, environment variables, and CLI args."""
@@ -66,7 +86,7 @@ class Config:
     DEFAULT_CONFIG = {
         "api": {
             "api_key": "",
-            "model": "gpt-5.2"
+            "model": "latest"
         },
         "parameters": {
             "temperature": 1.0,
@@ -115,25 +135,31 @@ class Config:
         return None
     
     @staticmethod
-    def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
+    def load_config(config_path: Optional[str] = None, require_exists: bool = False) -> Dict[str, Any]:
         """Load configuration from a JSON file."""
-        config = Config.DEFAULT_CONFIG.copy()
+        config = copy.deepcopy(Config.DEFAULT_CONFIG)
         
         # If no config path provided, try to find one
         if not config_path:
             config_path = Config.find_config_file()
         
         # If we found a config file, load and merge it
-        if config_path and os.path.exists(config_path):
+        if config_path:
+            if not os.path.exists(config_path):
+                if require_exists:
+                    raise FileNotFoundError(f"Config file not found: {config_path}")
+                return config
             try:
                 with open(config_path, 'r', encoding='utf-8') as f:
                     user_config = json.load(f)
                 
                 # Deep merge the user config into the default config
                 Config._merge_configs(config, user_config)
-                
+
                 logger.info(f"Loaded configuration from {config_path}")
             except Exception as e:
+                if require_exists:
+                    raise ValueError(f"Error loading config from {config_path}: {str(e)}") from e
                 logger.warning(f"Error loading config from {config_path}: {str(e)}")
         
         return config
@@ -262,18 +288,35 @@ class TSVHandler:
         if not os.path.exists(self.tsv_path):
             return
         
-        with open(self.tsv_path, "r", encoding="utf-8") as tsv_file:
-            header = next(tsv_file, None)
-            header_cols = header.strip().split("\t") if header else []
+        with open(self.tsv_path, "r", encoding="utf-8", newline="") as tsv_file:
+            reader = csv.reader(tsv_file, delimiter="\t")
+            try:
+                first_row = next(reader)
+            except StopIteration:
+                return
+
+            expected_columns = {
+                "OriginalFilename",
+                "ShortDescription",
+                "LongDescription",
+                "Context",
+                "Composite",
+                "SHA1"
+            }
+            if any(col in expected_columns for col in first_row):
+                header_cols = first_row
+                data_rows = reader
+            else:
+                header_cols = []
+                data_rows = [first_row] + list(reader)
+
             col_index = {col: idx for idx, col in enumerate(header_cols)}
             if header_cols:
                 self.has_context_column = "Context" in col_index
                 self.has_composite_column = "Composite" in col_index
-            for line in tsv_file:
-                line = line.strip()
-                if not line:
+            for parts in data_rows:
+                if not parts or not any(part.strip() for part in parts):
                     continue
-                parts = line.split("\t")
                 if not header_cols:
                     if len(parts) >= 6:
                         orig_filename, short_desc, long_desc, context, composite_raw, hash_value = parts[:6]
@@ -369,22 +412,44 @@ class TSVHandler:
 
     def write_all(self) -> None:
         """Rewrite the TSV with the current entries."""
-        with open(self.tsv_path, "w", encoding="utf-8") as tsv_file:
-            tsv_file.write("OriginalFilename\tShortDescription\tLongDescription\tContext\tComposite\tSHA1\n")
-            for entry in self.entries:
-                escaped_short = self._escape_newlines(entry.short_desc)
-                escaped_long = self._escape_newlines(entry.long_desc)
-                escaped_context = self._escape_newlines(entry.context)
-                composite_value = "yes" if entry.composite else "no"
-                line = (
-                    f"{entry.original_filename}\t"
-                    f"{escaped_short}\t"
-                    f"{escaped_long}\t"
-                    f"{escaped_context}\t"
-                    f"{composite_value}\t"
-                    f"{entry.file_hash}"
-                )
-                tsv_file.write(line + "\n")
+        folder = os.path.dirname(self.tsv_path) or "."
+        fd, temp_path = tempfile.mkstemp(
+            prefix=f".{os.path.basename(self.tsv_path)}.",
+            suffix=".tmp",
+            dir=folder,
+            text=True
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="") as tsv_file:
+                writer = csv.writer(tsv_file, delimiter="\t", lineterminator="\n")
+                writer.writerow([
+                    "OriginalFilename",
+                    "ShortDescription",
+                    "LongDescription",
+                    "Context",
+                    "Composite",
+                    "SHA1"
+                ])
+                for entry in self.entries:
+                    escaped_short = self._escape_newlines(entry.short_desc)
+                    escaped_long = self._escape_newlines(entry.long_desc)
+                    escaped_context = self._escape_newlines(entry.context)
+                    composite_value = "yes" if entry.composite else "no"
+                    writer.writerow([
+                        entry.original_filename,
+                        escaped_short,
+                        escaped_long,
+                        escaped_context,
+                        composite_value,
+                        entry.file_hash
+                    ])
+            os.replace(temp_path, self.tsv_path)
+        except Exception:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+            raise
 
     def write_excel(self, xlsx_path: str) -> bool:
         """Write the current entries to an Excel .xlsx file."""
@@ -426,7 +491,7 @@ class ImageDescriber:
     def __init__(
         self,
         api_key: str,
-        model: str = "gpt-5.2",
+        model: str = "latest",
         temperature: float = 1.0,
         max_tokens: int = 4000,
         system_prompt: Optional[str] = None,
@@ -441,7 +506,7 @@ class ImageDescriber:
                 "Install it with: pip install openai"
             )
         self.api_key = api_key
-        self.model = model
+        self.model = resolve_model_name(model)
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.client = OpenAI(api_key=api_key)
@@ -575,7 +640,7 @@ class ImageProcessor:
     def __init__(self, folder_path: str, config: Dict[str, Any], init_only: bool = False):
         self.folder_path = folder_path
         self.api_key = config["api"]["api_key"]
-        self.model = config["api"]["model"]
+        self.model = resolve_model_name(config["api"]["model"])
         self.temperature = config["parameters"]["temperature"]
         self.max_tokens = config["parameters"]["max_tokens"]
         self.no_copy = config["processing"]["no_copy"]
@@ -835,7 +900,6 @@ class ImageProcessor:
 
             composite_hash = self._compute_composite_hash(files)
             previous_hash = entry.file_hash
-            self.tsv_handler.update_entry_hash(entry, composite_hash)
             if entry.short_desc and entry.long_desc and previous_hash == composite_hash:
                 continue
             tasks.append((entry, files, composite_hash))
@@ -903,7 +967,17 @@ class ImageProcessor:
         """
         # Sanitize short_desc for file naming
         short_desc = FileHelper.sanitize_filename(result.short_desc)
-        
+
+        if self.no_copy:
+            self.tsv_handler.upsert_entry(
+                result.original_filename,
+                short_desc,
+                result.long_desc,
+                result.context,
+                result.file_hash
+            )
+            return
+
         # Build new filename
         _, ext = os.path.splitext(result.image_path)
         base_name = short_desc
@@ -927,13 +1001,11 @@ class ImageProcessor:
             logger.warning(f"Could not find unique name for {result.image_path} after {max_attempts} attempts. Skipping.")
             return
         
-        # Copy file unless no_copy is set
-        if not self.no_copy:
-            try:
-                shutil.copy2(result.image_path, new_image_path)
-            except Exception as e:
-                logger.error(f"Error copying {result.image_path} to {new_image_path}: {str(e)}")
-                return
+        try:
+            shutil.copy2(result.image_path, new_image_path)
+        except Exception as e:
+            logger.error(f"Error copying {result.image_path} to {new_image_path}: {str(e)}")
+            return
         
         # Final short name is the new image's base
         final_short_name = os.path.splitext(new_image_name)[0]
@@ -980,38 +1052,84 @@ class ImageProcessor:
         # We'll use this to track progress
         done_count = 0
         
-        # Parallel describing
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            future_to_kind = {}
-            for task in tasks:
-                future_to_kind[executor.submit(self.process_image, task)] = "image"
-            for task in composite_tasks:
-                future_to_kind[executor.submit(self.process_composite_task, task)] = "composite"
-            
-            for future in as_completed(future_to_kind):
-                result = future.result()
+        try:
+            # Parallel describing
+            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                future_to_kind = {}
+                for task in tasks:
+                    future_to_kind[executor.submit(self.process_image, task)] = "image"
+                for task in composite_tasks:
+                    future_to_kind[executor.submit(self.process_composite_task, task)] = "composite"
                 
-                with self.progress_lock:
-                    done_count += 1
-                    logger.info(f"{done_count} of {total_count} {row_label}")
-                
-                if result:
-                    kind = future_to_kind[future]
-                    if kind == "image":
-                        self.handle_image_result(result)
-                    else:
-                        self.handle_composite_result(result)
-        
-        # Rewrite TSV with updated entries
-        self.tsv_handler.write_all()
+                for future in as_completed(future_to_kind):
+                    result = None
+                    try:
+                        result = future.result()
+                    except Exception as e:
+                        logger.error(f"Error processing image task: {str(e)}")
+
+                    with self.progress_lock:
+                        done_count += 1
+                        logger.info(f"{done_count} of {total_count} {row_label}")
+
+                    if result:
+                        kind = future_to_kind[future]
+                        if kind == "image":
+                            self.handle_image_result(result)
+                        else:
+                            self.handle_composite_result(result)
+        finally:
+            # Rewrite TSV with updated entries, including successful results before any failure.
+            self.tsv_handler.write_all()
         logger.info(f"Processed {done_count} {row_label}.")
 
-    def init_tsv(self) -> None:
-        """Initialize a TSV with hashes and empty descriptions/context."""
+    def init_tsv(self, force: bool = False) -> None:
+        """Initialize or refresh a TSV with hashes and empty descriptions/context."""
         all_files = sorted(os.listdir(self.folder_path), key=str.lower)
         pending_hashes = set()
-        self.tsv_handler.entries = []
-        self.tsv_handler.entries_by_hash.clear()
+        existing_entries = [] if force else list(self.tsv_handler.entries)
+        existing_by_hash: Dict[str, TSVEntry] = {}
+        existing_singles_by_filename: Dict[str, TSVEntry] = {}
+        existing_composites_by_base: Dict[str, TSVEntry] = {}
+        matched_existing_ids: Set[int] = set()
+
+        for entry in existing_entries:
+            if entry.file_hash and entry.file_hash not in existing_by_hash:
+                existing_by_hash[entry.file_hash] = entry
+            if entry.composite:
+                base_key = self._normalize_base_name(entry.original_filename)
+                if base_key and base_key not in existing_composites_by_base:
+                    existing_composites_by_base[base_key] = entry
+            else:
+                filename_key = entry.original_filename.lower()
+                if filename_key and filename_key not in existing_singles_by_filename:
+                    existing_singles_by_filename[filename_key] = entry
+
+        new_entries: List[TSVEntry] = []
+        new_entries_by_hash: Dict[str, TSVEntry] = {}
+
+        def add_entry(entry: TSVEntry) -> None:
+            new_entries.append(entry)
+            if entry.file_hash and entry.file_hash not in new_entries_by_hash:
+                new_entries_by_hash[entry.file_hash] = entry
+
+        def refreshed_entry(
+            existing: Optional[TSVEntry],
+            orig_filename: str,
+            file_hash: str,
+            composite: bool,
+            preserve_descriptions: bool
+        ) -> TSVEntry:
+            if existing is not None:
+                matched_existing_ids.add(id(existing))
+            return TSVEntry(
+                original_filename=orig_filename,
+                short_desc=existing.short_desc if existing and preserve_descriptions else "",
+                long_desc=existing.long_desc if existing and preserve_descriptions else "",
+                context=existing.context if existing else "",
+                composite=composite,
+                file_hash=file_hash
+            )
 
         total_count = 0
         skip_filenames: Set[str] = set()
@@ -1021,14 +1139,21 @@ class ImageProcessor:
                     skip_filenames.add(filename.lower())
                 composite_hash = self._compute_composite_hash(files)
                 preferred_name = self._preferred_composite_name(base_name, files)
+                existing = existing_by_hash.get(composite_hash)
+                preserve_descriptions = existing is not None
+                if existing is None:
+                    existing = existing_composites_by_base.get(self._normalize_base_name(base_name))
+                    if existing is None:
+                        existing = existing_composites_by_base.get(self._normalize_base_name(preferred_name))
                 total_count += 1
-                self.tsv_handler.upsert_entry(
-                    orig_filename=preferred_name,
-                    short_desc="",
-                    long_desc="",
-                    context="",
-                    file_hash=composite_hash,
-                    composite=True
+                add_entry(
+                    refreshed_entry(
+                        existing=existing,
+                        orig_filename=preferred_name,
+                        file_hash=composite_hash,
+                        composite=True,
+                        preserve_descriptions=preserve_descriptions
+                    )
                 )
 
         for filename in all_files:
@@ -1041,20 +1166,39 @@ class ImageProcessor:
             if file_hash in pending_hashes:
                 continue
             pending_hashes.add(file_hash)
+            existing = existing_by_hash.get(file_hash)
+            preserve_descriptions = existing is not None
+            if existing is None:
+                existing = existing_singles_by_filename.get(filename.lower())
             total_count += 1
-            self.tsv_handler.upsert_entry(
-                orig_filename=filename,
-                short_desc="",
-                long_desc="",
-                context="",
-                file_hash=file_hash
+            add_entry(
+                refreshed_entry(
+                    existing=existing,
+                    orig_filename=filename,
+                    file_hash=file_hash,
+                    composite=False,
+                    preserve_descriptions=preserve_descriptions
+                )
             )
 
         if total_count == 0:
             logger.info("No images found to initialize.")
             return
+
+        preserved_count = 0
+        if not force:
+            for entry in existing_entries:
+                if id(entry) in matched_existing_ids:
+                    continue
+                preserved_count += 1
+                add_entry(entry)
+
+        self.tsv_handler.entries = new_entries
+        self.tsv_handler.entries_by_hash = new_entries_by_hash
         self.tsv_handler.write_all()
         logger.info(f"Initialized TSV for {total_count} rows.")
+        if preserved_count:
+            logger.info(f"Preserved {preserved_count} existing unmatched rows.")
 
     def make_excel(self) -> None:
         """Generate an Excel file from the current TSV entries."""
@@ -1119,6 +1263,11 @@ class CLI:
             help="Generate TSV with hashes and empty descriptions/context (folder mode only; composites auto-detected unless --no-composites)."
         )
         parser.add_argument(
+            "--force-init-tsv",
+            action="store_true",
+            help="Reset the TSV when using --init-tsv instead of preserving existing rows/context."
+        )
+        parser.add_argument(
             "--make-excel",
             action="store_true",
             help="Generate an Excel .xlsx file from the existing TSV (folder mode only)."
@@ -1136,7 +1285,7 @@ class CLI:
         parser.add_argument(
             "-m", "--model",
             type=str,
-            help="OpenAI model to use (default: gpt-5.2)"
+            help=f"OpenAI model to use (default: latest -> {LATEST_MODEL})"
         )
         
         # If user didn't supply any arguments, show help and exit
@@ -1144,7 +1293,16 @@ class CLI:
             parser.print_help(sys.stderr)
             sys.exit(1)
         
-        return parser.parse_args()
+        args = parser.parse_args()
+        if args.force_init_tsv and not args.init_tsv:
+            parser.error("--force-init-tsv requires --init-tsv")
+        if args.length is not None and args.length < 1:
+            parser.error("--length must be at least 1")
+        if args.workers is not None and args.workers < 1:
+            parser.error("--workers must be at least 1")
+        if args.temperature is not None and args.temperature < 0:
+            parser.error("--temperature must be non-negative")
+        return args
     
     @staticmethod
     def get_config(args: argparse.Namespace) -> Dict[str, Any]:
@@ -1161,7 +1319,11 @@ class CLI:
                 candidate = os.path.join(target_dir, "config.json")
                 if os.path.exists(candidate):
                     config_path = candidate
-        config = Config.load_config(config_path)
+        try:
+            config = Config.load_config(config_path, require_exists=bool(args.config))
+        except (FileNotFoundError, ValueError) as e:
+            print(f"Error: {str(e)}", file=sys.stderr)
+            sys.exit(1)
         
         # Override with command line args
         if args.api_key:
@@ -1245,7 +1407,7 @@ class CLI:
                 if args.show_composites:
                     processor.show_composites()
                 if args.init_tsv:
-                    processor.init_tsv()
+                    processor.init_tsv(force=args.force_init_tsv)
                 if args.make_excel:
                     processor.make_excel()
             else:
