@@ -101,23 +101,15 @@ class Config:
         "output": {
             "output_folder_name": "Described",
             "tsv_filename": "descriptions.tsv"
-        },
-        "prompt": {
-            "system_prompt": """
-            You are a system generating accurate and detailed visual descriptions.
-            Provided with an image, you will generate a short description of no more than 10 words and a long description which will be lengthy and detailed.
-            The short description is going to be used in a filename on Windows and Mac, so no special characters or punctuation must be used that is prohibited in filenames. Never end the short description with a period or other punctuation.
-            The long description must contain as much accurate detailed information as possible. Do not start the description with "an image of" or "photo of" or anything like that, just dive into the description. The structure of a long visual description should be an overview sentence explaining the whole image followed by supporting sentences to add more detail. Always transcribe any and all text accurately and identify any famous figures or entities you are allowed to identify. Think through the description step by step and construct a well-formed description.
-            Output exactly two lines in this format:
-            SHORT: <short description>
-            LONG: <long description>
-            """,
-            "single_image_prompt": "Describe the following image.",
-            "composite_image_prompt": "Describe the following images together as a single composite.",
-            "context_template": "Additional image facts provided by the user (treat as true): {context}",
-            "short_description_max_words": 10
         }
     }
+    REQUIRED_PROMPT_FIELDS = (
+        "system_prompt",
+        "single_image_prompt",
+        "composite_image_prompt",
+        "context_template",
+        "short_description_max_words"
+    )
     
     @staticmethod
     def find_config_file() -> Optional[str]:
@@ -172,6 +164,32 @@ class Config:
                 Config._merge_configs(target[key], value)
             else:
                 target[key] = value
+
+    @staticmethod
+    def validate_prompt_config(config: Dict[str, Any]) -> None:
+        """Ensure API prompt settings come from config."""
+        prompt_config = config.get("prompt")
+        if not isinstance(prompt_config, dict):
+            raise ValueError(
+                "Missing prompt configuration. Copy config.json.sample to config.json "
+                "or provide a config file with a prompt section."
+            )
+
+        missing = [
+            field
+            for field in Config.REQUIRED_PROMPT_FIELDS
+            if field not in prompt_config or prompt_config[field] in (None, "")
+        ]
+        if missing:
+            missing_fields = ", ".join(missing)
+            raise ValueError(
+                f"Missing prompt configuration value(s): {missing_fields}. "
+                "Use config.json.sample as a reference."
+            )
+
+        max_words = prompt_config["short_description_max_words"]
+        if not isinstance(max_words, int) or max_words < 1:
+            raise ValueError("prompt.short_description_max_words must be an integer of at least 1.")
 
 
 @dataclass
@@ -510,23 +528,20 @@ class ImageDescriber:
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.client = OpenAI(api_key=api_key)
-        default_prompt = Config.DEFAULT_CONFIG["prompt"]
-        self.system_prompt = system_prompt if system_prompt is not None else default_prompt["system_prompt"]
-        self.single_image_prompt = (
-            single_image_prompt
-            if single_image_prompt is not None
-            else default_prompt["single_image_prompt"]
-        )
-        self.composite_image_prompt = (
-            composite_image_prompt
-            if composite_image_prompt is not None
-            else default_prompt["composite_image_prompt"]
-        )
-        self.context_template = (
-            context_template
-            if context_template is not None
-            else default_prompt["context_template"]
-        )
+        if not system_prompt:
+            raise ValueError("Missing prompt configuration value: system_prompt.")
+        if not single_image_prompt:
+            raise ValueError("Missing prompt configuration value: single_image_prompt.")
+        if not composite_image_prompt:
+            raise ValueError("Missing prompt configuration value: composite_image_prompt.")
+        if not context_template:
+            raise ValueError("Missing prompt configuration value: context_template.")
+        if not isinstance(short_description_max_words, int) or short_description_max_words < 1:
+            raise ValueError("prompt.short_description_max_words must be an integer of at least 1.")
+        self.system_prompt = system_prompt
+        self.single_image_prompt = single_image_prompt
+        self.composite_image_prompt = composite_image_prompt
+        self.context_template = context_template
         self.short_description_max_words = short_description_max_words
     
     def _limit_short_description(self, short_desc: str) -> str:
@@ -625,8 +640,7 @@ class ImageDescriber:
             # Fallback if format is unexpected
             logger.warning(f"Unexpected response format for {image_path}")
             words = text_response.split()
-            max_words = self.short_description_max_words or 10
-            short_desc = " ".join(words[:max_words])
+            short_desc = " ".join(words[:self.short_description_max_words])
             short_desc = self._limit_short_description(short_desc)
             return short_desc, text_response
         except Exception as e:
@@ -649,17 +663,19 @@ class ImageProcessor:
         self.verbose = config["processing"]["verbose"]
         self.output_folder_name = config["output"]["output_folder_name"]
         self.tsv_filename = config["output"]["tsv_filename"]
-        self.system_prompt = config["prompt"]["system_prompt"]
-        self.single_image_prompt = config["prompt"].get("single_image_prompt")
-        self.composite_image_prompt = config["prompt"].get("composite_image_prompt")
-        self.context_template = config["prompt"].get("context_template")
-        self.short_description_max_words = config["prompt"].get("short_description_max_words")
+        prompt_config = config.get("prompt", {})
+        self.system_prompt = prompt_config.get("system_prompt")
+        self.single_image_prompt = prompt_config.get("single_image_prompt")
+        self.composite_image_prompt = prompt_config.get("composite_image_prompt")
+        self.context_template = prompt_config.get("context_template")
+        self.short_description_max_words = prompt_config.get("short_description_max_words")
         
         self.described_folder_path = FileHelper.ensure_described_folder(folder_path, self.output_folder_name, self.no_copy)
         self.tsv_path = os.path.join(self.described_folder_path, self.tsv_filename)
         self.tsv_handler = TSVHandler(self.tsv_path)
         self.describer = None
         if not init_only:
+            Config.validate_prompt_config(config)
             self.describer = ImageDescriber(
                 api_key=self.api_key,
                 model=self.model,
@@ -1352,6 +1368,7 @@ class CLI:
     @staticmethod
     def process_single_image(image_path: str, config: Dict[str, Any]) -> None:
         """Process a single image file and output descriptions directly."""
+        Config.validate_prompt_config(config)
         if config["processing"]["verbose"]:
             # Enable HTTP request logging in verbose mode
             logging.getLogger("openai").setLevel(logging.INFO)
@@ -1363,10 +1380,10 @@ class CLI:
             temperature=config["parameters"]["temperature"],
             max_tokens=config["parameters"]["max_tokens"],
             system_prompt=config["prompt"]["system_prompt"],
-            single_image_prompt=config["prompt"].get("single_image_prompt"),
-            composite_image_prompt=config["prompt"].get("composite_image_prompt"),
-            context_template=config["prompt"].get("context_template"),
-            short_description_max_words=config["prompt"].get("short_description_max_words")
+            single_image_prompt=config["prompt"]["single_image_prompt"],
+            composite_image_prompt=config["prompt"]["composite_image_prompt"],
+            context_template=config["prompt"]["context_template"],
+            short_description_max_words=config["prompt"]["short_description_max_words"]
         )
         
         short_desc, long_desc = describer.describe_image(image_path)
@@ -1396,44 +1413,48 @@ class CLI:
             print("Error: OpenAI API key not provided. Use -k/--api-key, set OPENAI_API_KEY environment variable, or add it to config.json.", file=sys.stderr)
             sys.exit(1)
         
-        # Check if path is a directory or a file
-        if os.path.isdir(args.path):
-            if args.show_composites or args.init_tsv or args.make_excel:
-                processor = ImageProcessor(
-                    folder_path=args.path,
-                    config=config,
-                    init_only=True
-                )
-                if args.show_composites:
-                    processor.show_composites()
+        try:
+            # Check if path is a directory or a file
+            if os.path.isdir(args.path):
+                if args.show_composites or args.init_tsv or args.make_excel:
+                    processor = ImageProcessor(
+                        folder_path=args.path,
+                        config=config,
+                        init_only=True
+                    )
+                    if args.show_composites:
+                        processor.show_composites()
+                    if args.init_tsv:
+                        processor.init_tsv(force=args.force_init_tsv)
+                    if args.make_excel:
+                        processor.make_excel()
+                else:
+                    # Process folder
+                    processor = ImageProcessor(
+                        folder_path=args.path,
+                        config=config
+                    )
+                    processor.process_all()
+            elif os.path.isfile(args.path) and args.path.lower().endswith(VALID_EXTENSIONS):
                 if args.init_tsv:
-                    processor.init_tsv(force=args.force_init_tsv)
+                    print("Error: --init-tsv is only supported for folder mode.", file=sys.stderr)
+                    sys.exit(1)
+                if args.show_composites:
+                    print("Error: --show-composites is only supported for folder mode.", file=sys.stderr)
+                    sys.exit(1)
                 if args.make_excel:
-                    processor.make_excel()
-            else:
-                # Process folder
-                processor = ImageProcessor(
-                    folder_path=args.path,
+                    print("Error: --make-excel is only supported for folder mode.", file=sys.stderr)
+                    sys.exit(1)
+                # Process single image
+                CLI.process_single_image(
+                    image_path=args.path,
                     config=config
                 )
-                processor.process_all()
-        elif os.path.isfile(args.path) and args.path.lower().endswith(VALID_EXTENSIONS):
-            if args.init_tsv:
-                print("Error: --init-tsv is only supported for folder mode.", file=sys.stderr)
+            else:
+                print(f"Error: '{args.path}' is not a valid directory or image file.", file=sys.stderr)
                 sys.exit(1)
-            if args.show_composites:
-                print("Error: --show-composites is only supported for folder mode.", file=sys.stderr)
-                sys.exit(1)
-            if args.make_excel:
-                print("Error: --make-excel is only supported for folder mode.", file=sys.stderr)
-                sys.exit(1)
-            # Process single image
-            CLI.process_single_image(
-                image_path=args.path,
-                config=config
-            )
-        else:
-            print(f"Error: '{args.path}' is not a valid directory or image file.", file=sys.stderr)
+        except ValueError as e:
+            print(f"Error: {str(e)}", file=sys.stderr)
             sys.exit(1)
 
 

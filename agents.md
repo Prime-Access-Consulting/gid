@@ -47,13 +47,13 @@ python gid.py /path/to/images --verbose
 - `-c`, `--config`: path to config file
 
 ## Configuration Resolution
-1. Start from `Config.DEFAULT_CONFIG` in `gid.py` (model `latest`, currently resolved to `gpt-5.5`; temperature `1.0`; max tokens `4000`).
+1. Start from `Config.DEFAULT_CONFIG` in `gid.py` (model `latest`, currently resolved to `gpt-5.5`; temperature `1.0`; max tokens `4000`). Prompt text is not hard-coded there.
 2. If a config file exists, deep-merge it:
    - `config.json` in the folder being described, else current directory, else `~/.config/gid/config.json`
    - The repo includes `config.json.sample` as a starting point.
 3. CLI flags override config values.
 4. `OPENAI_API_KEY` is used only if no API key was provided by file or CLI.
-Note: the CLI help text lists code defaults, but actual values come from the config resolution above. Model aliases `latest`, `gpt-latest`, `gpt-5-latest`, and `5` currently resolve to `gpt-5.5`.
+Note: the CLI help text lists code defaults, but actual values come from the config resolution above. Model aliases `latest`, `gpt-latest`, `gpt-5-latest`, and `5` currently resolve to `gpt-5.5`. API modes require the `prompt` section from config; use `config.json.sample` as the reference.
 
 ## Modes and Output
 - **Folder mode** (path is a directory):
@@ -80,9 +80,9 @@ Note: the CLI help text lists code defaults, but actual values come from the con
 - Uses the Responses API with `input_image` content and `instructions` for the system prompt.
 - Sends `max_output_tokens=<max_tokens>` and includes `temperature` only when it differs from the default 1.0.
 - If a row has `Context`, it is appended to the prompt as additional image facts (treated as true).
-- Composite rows use a multi-image prompt: "Describe the following images together as a single composite."
+- Composite rows use `prompt.composite_image_prompt` from config.
 - Short descriptions are trimmed to `short_description_max_words` (default 10).
-- The prompt instructs the model to output:
+- The sample prompt instructs the model to output:
   - `SHORT: ...` on line 1
   - `LONG: ...` on line 2
 - The response parser accepts:

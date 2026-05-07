@@ -176,6 +176,7 @@ You can use a JSON configuration file to customize GID's behavior. The config fi
 - Any custom path specified with the `--config` flag
 
 A sample configuration file is provided as `config.json.sample`.
+Prompt settings are not hard-coded in the script; API modes require the `prompt` section from a config file.
 
 The configuration file supports the following settings:
 
@@ -200,7 +201,7 @@ The configuration file supports the following settings:
     "tsv_filename": "descriptions.tsv"  // Name of TSV file
   },
   "prompt": {
-    "system_prompt": "...", // Custom prompt template
+    "system_prompt": "...", // Required prompt template
     "single_image_prompt": "Describe the following image.",
     "composite_image_prompt": "Describe the following images together as a single composite.",
     "context_template": "Additional image facts provided by the user (treat as true): {context}",
@@ -215,7 +216,7 @@ The built-in model aliases `latest`, `gpt-latest`, `gpt-5-latest`, and `5` curre
 
 ### Prompt Output Format
 
-The default prompt asks the model to return exactly two lines:
+The sample prompt asks the model to return exactly two lines:
 
 - `SHORT: <short description>`
 - `LONG: <long description>`
