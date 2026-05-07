@@ -1,6 +1,6 @@
 # GID - Generate Image Descriptions
 
-GID is a Python tool for automatically generating human-readable descriptions of images using OpenAI's latest recommended GPT model. It processes image files in a specified folder, creates both short and detailed descriptions, and optionally renames and copies the files based on their descriptions.
+GID is a Python tool for automatically generating human-readable descriptions of images using a configured OpenAI model. It processes image files in a specified folder, creates both short and detailed descriptions, and optionally renames and copies the files based on their descriptions.
 
 ## Features
 
@@ -22,7 +22,7 @@ GID is a Python tool for automatically generating human-readable descriptions of
 ### Prerequisites
 
 - Python 3.7+
-- OpenAI API key with access to GPT-5.5 or the current latest recommended model
+- OpenAI API key with access to the configured model. The default is `gpt-5.5`.
 
 ### Setup
 
@@ -51,16 +51,7 @@ GID is a Python tool for automatically generating human-readable descriptions of
    $env:OPENAI_API_KEY="your_api_key_here"
    ```
    
-   b. Using config.json in the current directory (copy `config.json.sample` to `config.json` and edit):
-   ```json
-   {
-     "api": {
-       "api_key": "your_api_key_here"
-     }
-   }
-   ```
-   
-   c. Using command-line argument:
+   b. Using command-line argument:
    ```bash
    python gid.py /path/to/images -k your_api_key_here
    ```
@@ -95,32 +86,40 @@ This will:
 ### Command-Line Options
 
 ```
-usage: gid.py [-h] [-t TEMPERATURE] [-l LENGTH] [-n] [-k API_KEY] [-w WORKERS] [-v] [-c CONFIG] [-m MODEL] [path]
+usage: gid.py [-h] [-t TEMPERATURE] [-l LENGTH] [-n] [-k API_KEY] [-w WORKERS]
+              [-v] [-c CONFIG] [--init-tsv] [--force-init-tsv] [--make-excel]
+              [--no-composites] [--show-composites]
+              [--write-sample-config [PATH]] [-m MODEL]
+              [--reasoning-effort {none,low,medium,high,xhigh}]
+              [path]
 
 positional arguments:
   path                  Path to folder or single image file.
 
 options:
   -h, --help            show this help message and exit
-  -t TEMPERATURE, --temperature TEMPERATURE
+  -t, --temperature TEMPERATURE
                         Sampling temperature for OpenAI (default=1.0).
-  -l LENGTH, --length LENGTH
-                        Max tokens (default=4000).
-  --init-tsv            Generate TSV with hashes and empty descriptions/context (folder mode only).
+  -l, --length LENGTH   Max tokens (default=4000).
+  -n, --no-copy         If provided, do NOT copy files to the output folder (folder mode only).
+  -k, --api-key API_KEY
+                        OpenAI API key (overrides config file and environment variable).
+  -w, --workers WORKERS
+                        Maximum number of concurrent workers (folder mode only).
+  -v, --verbose         Enable verbose output including HTTP requests.
+  -c, --config CONFIG
+                        Path to the configuration file (default: config.json in the target folder, current directory, or ~/.config/gid/config.json)
+  --init-tsv            Generate TSV with hashes and empty descriptions/context (folder mode only; composites auto-detected unless --no-composites).
   --force-init-tsv      Reset the TSV when using --init-tsv instead of preserving existing rows/context.
   --make-excel          Generate an Excel .xlsx file from the existing TSV (folder mode only).
   --no-composites       Disable automatic composite detection (process all images individually).
   --show-composites     List discovered composite sets and their matching files (folder mode only).
-  -n, --no-copy         If provided, do NOT copy files to the output folder (folder mode only).
-  -k API_KEY, --api-key API_KEY
-                        OpenAI API key (overrides config file and environment variable).
-  -w WORKERS, --workers WORKERS
-                        Maximum number of concurrent workers (folder mode only).
-  -v, --verbose         Enable verbose output including HTTP requests.
-  -c CONFIG, --config CONFIG
-                        Path to the configuration file (default: config.json in the target folder, current directory, or ~/.config/gid/config.json)
-  -m MODEL, --model MODEL
-                        OpenAI model to use (default: latest -> gpt-5.5)
+  --write-sample-config [PATH]
+                        Write built-in defaults to a sample config file and exit (default: config.json.sample).
+  -m, --model MODEL     OpenAI model ID to send to the API (default: gpt-5.5).
+  --reasoning-effort {none,low,medium,high,xhigh}
+                        Reasoning effort for supported models (default: medium).
+                        Choices: none, low, medium, high, xhigh.
 ```
 
 Temperature defaults to **1.0** unless you override it with `--temperature` or the config file.
@@ -152,6 +151,16 @@ Process a single image with higher temperature:
 python gid.py /path/to/image.jpg --temperature 0.9
 ```
 
+Use a higher reasoning effort with the default reasoning model:
+```bash
+python gid.py /path/to/images --reasoning-effort high
+```
+
+Use a specific model ID:
+```bash
+python gid.py /path/to/images --model gpt-5.5
+```
+
 Enable verbose mode to see detailed API request logs:
 ```bash
 python gid.py /path/to/images --verbose
@@ -167,6 +176,11 @@ Generate an Excel file from an existing TSV (no API calls):
 python gid.py /path/to/images --make-excel
 ```
 
+Regenerate the sample config from built-in defaults:
+```bash
+python gid.py --write-sample-config
+```
+
 ### Configuration File
 
 You can use a JSON configuration file to customize GID's behavior. The config file can be placed in one of these locations:
@@ -175,20 +189,20 @@ You can use a JSON configuration file to customize GID's behavior. The config fi
 - `~/.config/gid/config.json` in your home directory
 - Any custom path specified with the `--config` flag
 
-A sample configuration file is provided as `config.json.sample`.
-Prompt settings are not hard-coded in the script; API modes require the `prompt` section from a config file.
+Defaults are defined centrally in `gid.py`. A sample configuration file is provided as `config.json.sample`, but the running program does not depend on it. Your own `config.json` only needs values you want to override. Regenerate the sample at any time with `python gid.py --write-sample-config`. Placeholder values such as `"api_key": "..."` are for documentation and are treated as unset.
 
 The configuration file supports the following settings:
 
 ```json
 {
   "api": {
-    "api_key": "",         // Your OpenAI API key
-    "model": "latest"      // OpenAI model to use (latest resolves to gpt-5.5)
+    "api_key": "...",       // Optional; prefer OPENAI_API_KEY or --api-key
+    "model": "gpt-5.5"     // OpenAI model ID to send to the API
   },
   "parameters": {
     "temperature": 1.0,    // Sampling temperature
-    "max_tokens": 4000     // Maximum response tokens
+    "max_tokens": 4000,    // Maximum response tokens
+    "reasoning_effort": "medium" // none, low, medium, high, or xhigh
   },
   "processing": {
     "no_copy": false,      // Whether to skip copying files
@@ -204,7 +218,7 @@ The configuration file supports the following settings:
     "system_prompt": "...", // Required prompt template
     "single_image_prompt": "Describe the following image.",
     "composite_image_prompt": "Describe the following images together as a single composite.",
-    "context_template": "Additional image facts provided by the user (treat as true): {context}",
+    "context_template": "Additional image facts provided by the user (treat as true and naturally incorporate that knowledge if helpful or necessary to inform the description): {context}",
     "short_description_max_words": 10   // Max words in short description
   }
 }
@@ -212,7 +226,9 @@ The configuration file supports the following settings:
 
 Command-line arguments will override settings in the configuration file.
 Use `{context}` in `context_template`; it will be replaced with the row's **Context** value.
-The built-in model aliases `latest`, `gpt-latest`, `gpt-5-latest`, and `5` currently resolve to `gpt-5.5`.
+Use `{short_description_max_words}` in prompt text when referring to the configured short-description length, so changing the numeric value updates the rendered prompt.
+Model IDs are passed directly to the OpenAI API. GID does not resolve aliases such as `latest` or `5`.
+The default `reasoning_effort` is `medium`; accepted values are `none`, `low`, `medium`, `high`, and `xhigh`.
 
 ### Prompt Output Format
 
@@ -229,7 +245,7 @@ GID strips these labels when saving to the TSV. If the model returns unlabeled t
 
 The script generates a tab-separated values (TSV) file with the following columns:
 1. **OriginalFilename**: The original filename of the image
-2. **ShortDescription**: A short description suitable for filenames (10 words or less)
+2. **ShortDescription**: A short description suitable for filenames, trimmed to `short_description_max_words`
 3. **LongDescription**: A detailed description of the image content
 4. **Context**: Optional per-image facts provided by a user to improve descriptions
 5. **Composite**: `yes` or `no` (case-insensitive). If `yes`, this row represents a composite image set (auto-detected by filename unless `--no-composites` is used).
@@ -278,4 +294,4 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## Acknowledgments
 
-This tool uses OpenAI's latest recommended GPT model to generate image descriptions.
+This tool uses OpenAI's API to generate image descriptions.

@@ -62,35 +62,37 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 # Valid image extensions
 VALID_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp")
 
-# GID's moving model alias. Update this when OpenAI recommends a newer default.
-LATEST_MODEL = "gpt-5.5"
-MODEL_ALIASES = {
-    "latest": LATEST_MODEL,
-    "gpt-latest": LATEST_MODEL,
-    "gpt-5-latest": LATEST_MODEL,
-    "5": LATEST_MODEL
-}
+DEFAULT_MODEL = "gpt-5.5"
+REASONING_EFFORT_VALUES = ("none", "low", "medium", "high", "xhigh")
+DEFAULT_REASONING_EFFORT = "medium"
 
 
-def resolve_model_name(model_name: Optional[str]) -> str:
-    """Resolve GID model aliases to concrete OpenAI model IDs."""
-    name = (model_name or "").strip()
-    if not name:
-        return LATEST_MODEL
-    return MODEL_ALIASES.get(name.lower(), name)
+def render_prompt_template(
+    template: str,
+    short_description_max_words: int,
+    context: Optional[str] = None
+) -> str:
+    """Render supported config prompt placeholders."""
+    rendered = template.replace(
+        "{short_description_max_words}",
+        str(short_description_max_words)
+    )
+    if context is not None:
+        rendered = rendered.replace("{context}", context)
+    return rendered
 
 
 class Config:
     """Class to handle configuration from config.json, environment variables, and CLI args."""
-    
-    DEFAULT_CONFIG = {
+
+    DEFAULT_CONFIG: Dict[str, Any] = {
         "api": {
-            "api_key": "",
-            "model": "latest"
+            "model": DEFAULT_MODEL
         },
         "parameters": {
             "temperature": 1.0,
-            "max_tokens": 4000
+            "max_tokens": 4000,
+            "reasoning_effort": DEFAULT_REASONING_EFFORT
         },
         "processing": {
             "no_copy": False,
@@ -101,6 +103,37 @@ class Config:
         "output": {
             "output_folder_name": "Described",
             "tsv_filename": "descriptions.tsv"
+        },
+        "prompt": {
+            "system_prompt": (
+                "You are a system generating accurate and detailed visual descriptions.\n"
+                "Provided with an image, you will generate a short description of no more than "
+                "{short_description_max_words} words and a long description which will be lengthy and detailed.\n"
+                "The short description is going to be used in a filename on Windows and Mac, so no special "
+                "characters or punctuation must be used that is prohibited in filenames. Never end the short "
+                "description with a period or other punctuation.\n"
+                "The long description must contain as much accurate detailed information as possible. Do not "
+                "start the description with \"an image of\" or \"photo of\" or anything like that, just dive "
+                "into the description. The structure of a long visual description should be an overview sentence "
+                "explaining the whole image followed by supporting sentences to add more detail. Always transcribe "
+                "any and all text accurately and identify any famous figures or entities you are allowed to "
+                "identify. Think through the description step by step and construct a well-formed description.\n"
+                "Output exactly two lines in this format:\n"
+                "SHORT: <short description>\n"
+                "LONG: <long description>"
+            ),
+            "single_image_prompt": "Describe the following image.",
+            "composite_image_prompt": "Describe the following images together as a single composite.",
+            "context_template": (
+                "Additional image facts provided by the user (treat as true and naturally incorporate that "
+                "knowledge if helpful or necessary to inform the description): {context}"
+            ),
+            "short_description_max_words": 10
+        }
+    }
+    SAMPLE_CONFIG_OVERRIDES: Dict[str, Any] = {
+        "api": {
+            "api_key": "..."
         }
     }
     REQUIRED_PROMPT_FIELDS = (
@@ -125,12 +158,39 @@ class Config:
             return user_config_file
         
         return None
-    
+
+    @staticmethod
+    def _load_json_config(config_path: str) -> Dict[str, Any]:
+        """Load a JSON config file."""
+        with open(config_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+
+    @staticmethod
+    def sample_config() -> Dict[str, Any]:
+        """Return a complete sample config, including non-runtime placeholders."""
+        config = copy.deepcopy(Config.DEFAULT_CONFIG)
+        api_config = config.get("api", {})
+        config["api"] = {
+            "api_key": Config.SAMPLE_CONFIG_OVERRIDES["api"]["api_key"],
+            **api_config
+        }
+        return config
+
+    @staticmethod
+    def write_sample_config(output_path: str) -> None:
+        """Write the built-in defaults as a sample config file."""
+        output_dir = os.path.dirname(output_path)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(Config.sample_config(), f, indent=2)
+            f.write("\n")
+
     @staticmethod
     def load_config(config_path: Optional[str] = None, require_exists: bool = False) -> Dict[str, Any]:
         """Load configuration from a JSON file."""
         config = copy.deepcopy(Config.DEFAULT_CONFIG)
-        
+
         # If no config path provided, try to find one
         if not config_path:
             config_path = Config.find_config_file()
@@ -142,8 +202,7 @@ class Config:
                     raise FileNotFoundError(f"Config file not found: {config_path}")
                 return config
             try:
-                with open(config_path, 'r', encoding='utf-8') as f:
-                    user_config = json.load(f)
+                user_config = Config._load_json_config(config_path)
                 
                 # Deep merge the user config into the default config
                 Config._merge_configs(config, user_config)
@@ -190,6 +249,26 @@ class Config:
         max_words = prompt_config["short_description_max_words"]
         if not isinstance(max_words, int) or max_words < 1:
             raise ValueError("prompt.short_description_max_words must be an integer of at least 1.")
+
+    @staticmethod
+    def normalize_model_name(model_name: Any) -> str:
+        """Validate and normalize a model ID before sending it to OpenAI."""
+        if not isinstance(model_name, str) or not model_name.strip():
+            raise ValueError("api.model must be a non-empty OpenAI model ID.")
+        return model_name.strip()
+
+    @staticmethod
+    def normalize_reasoning_effort(reasoning_effort: Any) -> Optional[str]:
+        """Validate and normalize a reasoning effort value."""
+        if reasoning_effort is None:
+            return None
+        if not isinstance(reasoning_effort, str):
+            raise ValueError("parameters.reasoning_effort must be a string.")
+        normalized = reasoning_effort.strip().lower()
+        if normalized not in REASONING_EFFORT_VALUES:
+            valid_values = ", ".join(REASONING_EFFORT_VALUES)
+            raise ValueError(f"parameters.reasoning_effort must be one of: {valid_values}.")
+        return normalized
 
 
 @dataclass
@@ -509,9 +588,10 @@ class ImageDescriber:
     def __init__(
         self,
         api_key: str,
-        model: str = "latest",
+        model: str = DEFAULT_MODEL,
         temperature: float = 1.0,
         max_tokens: int = 4000,
+        reasoning_effort: Optional[str] = DEFAULT_REASONING_EFFORT,
         system_prompt: Optional[str] = None,
         single_image_prompt: Optional[str] = None,
         composite_image_prompt: Optional[str] = None,
@@ -524,9 +604,10 @@ class ImageDescriber:
                 "Install it with: pip install openai"
             )
         self.api_key = api_key
-        self.model = resolve_model_name(model)
+        self.model = Config.normalize_model_name(model)
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.reasoning_effort = Config.normalize_reasoning_effort(reasoning_effort)
         self.client = OpenAI(api_key=api_key)
         if not system_prompt:
             raise ValueError("Missing prompt configuration value: system_prompt.")
@@ -538,11 +619,14 @@ class ImageDescriber:
             raise ValueError("Missing prompt configuration value: context_template.")
         if not isinstance(short_description_max_words, int) or short_description_max_words < 1:
             raise ValueError("prompt.short_description_max_words must be an integer of at least 1.")
-        self.system_prompt = system_prompt
+        self.short_description_max_words = short_description_max_words
+        self.system_prompt = render_prompt_template(
+            system_prompt,
+            self.short_description_max_words
+        )
         self.single_image_prompt = single_image_prompt
         self.composite_image_prompt = composite_image_prompt
         self.context_template = context_template
-        self.short_description_max_words = short_description_max_words
     
     def _limit_short_description(self, short_desc: str) -> str:
         """Trim short description to the configured max word count."""
@@ -568,6 +652,10 @@ class ImageDescriber:
             prompt_text = self.single_image_prompt
             if len(image_paths) > 1:
                 prompt_text = self.composite_image_prompt
+            prompt_text = render_prompt_template(
+                prompt_text,
+                self.short_description_max_words
+            )
             content.append({"type": "input_text", "text": prompt_text})
             for image_path in image_paths:
                 encoded_image = FileHelper.encode_image(image_path)
@@ -580,9 +668,17 @@ class ImageDescriber:
                 context_value = context.strip()
                 template = self.context_template or ""
                 if "{context}" in template:
-                    context_text = template.replace("{context}", context_value)
+                    context_text = render_prompt_template(
+                        template,
+                        self.short_description_max_words,
+                        context_value
+                    )
                 else:
-                    context_text = f"{template} {context_value}".strip() if template else context_value
+                    rendered_template = render_prompt_template(
+                        template,
+                        self.short_description_max_words
+                    )
+                    context_text = f"{rendered_template} {context_value}".strip() if rendered_template else context_value
                 instructions = f"{instructions.strip()}\n\n{context_text}"
 
             response_params = {
@@ -598,6 +694,8 @@ class ImageDescriber:
             }
             if self.temperature is not None and self.temperature != 1.0:
                 response_params["temperature"] = self.temperature
+            if self.reasoning_effort is not None:
+                response_params["reasoning"] = {"effort": self.reasoning_effort}
 
             response = self.client.responses.create(**response_params)
             
@@ -654,9 +752,12 @@ class ImageProcessor:
     def __init__(self, folder_path: str, config: Dict[str, Any], init_only: bool = False):
         self.folder_path = folder_path
         self.api_key = config["api"]["api_key"]
-        self.model = resolve_model_name(config["api"]["model"])
+        self.model = Config.normalize_model_name(config["api"]["model"])
         self.temperature = config["parameters"]["temperature"]
         self.max_tokens = config["parameters"]["max_tokens"]
+        self.reasoning_effort = Config.normalize_reasoning_effort(
+            config["parameters"].get("reasoning_effort")
+        )
         self.no_copy = config["processing"]["no_copy"]
         self.no_composites = config["processing"].get("no_composites", False)
         self.max_workers = config["processing"]["max_workers"]
@@ -681,6 +782,7 @@ class ImageProcessor:
                 model=self.model,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
+                reasoning_effort=self.reasoning_effort,
                 system_prompt=self.system_prompt,
                 single_image_prompt=self.single_image_prompt,
                 composite_image_prompt=self.composite_image_prompt,
@@ -1299,9 +1401,24 @@ class CLI:
             help="List discovered composite sets and their matching files (folder mode only)."
         )
         parser.add_argument(
+            "--write-sample-config",
+            nargs="?",
+            const="config.json.sample",
+            metavar="PATH",
+            help="Write built-in defaults to a sample config file and exit (default: config.json.sample)."
+        )
+        parser.add_argument(
             "-m", "--model",
             type=str,
-            help=f"OpenAI model to use (default: latest -> {LATEST_MODEL})"
+            help=f"OpenAI model ID to send to the API (default: {DEFAULT_MODEL})."
+        )
+        parser.add_argument(
+            "--reasoning-effort",
+            choices=REASONING_EFFORT_VALUES,
+            help=(
+                f"Reasoning effort for supported models (default: {DEFAULT_REASONING_EFFORT}). "
+                f"Choices: {', '.join(REASONING_EFFORT_VALUES)}."
+            )
         )
         
         # If user didn't supply any arguments, show help and exit
@@ -1312,6 +1429,10 @@ class CLI:
         args = parser.parse_args()
         if args.force_init_tsv and not args.init_tsv:
             parser.error("--force-init-tsv requires --init-tsv")
+        if args.write_sample_config and (
+            args.init_tsv or args.make_excel or args.show_composites
+        ):
+            parser.error("--write-sample-config cannot be combined with folder no-API actions")
         if args.length is not None and args.length < 1:
             parser.error("--length must be at least 1")
         if args.workers is not None and args.workers < 1:
@@ -1340,12 +1461,19 @@ class CLI:
         except (FileNotFoundError, ValueError) as e:
             print(f"Error: {str(e)}", file=sys.stderr)
             sys.exit(1)
-        
+
+        config.setdefault("api", {})
+        config.setdefault("parameters", {})
+        config.setdefault("processing", {})
+        config.setdefault("output", {})
+
         # Override with command line args
         if args.api_key:
             config["api"]["api_key"] = args.api_key
         if args.model:
             config["api"]["model"] = args.model
+        if args.reasoning_effort:
+            config["parameters"]["reasoning_effort"] = args.reasoning_effort
         if args.temperature is not None:
             config["parameters"]["temperature"] = args.temperature
         if args.length is not None:
@@ -1358,11 +1486,22 @@ class CLI:
             config["processing"]["max_workers"] = args.workers
         if args.verbose:
             config["processing"]["verbose"] = True
-        
+
         # Check for API key in environment if not in config or args
-        if not config["api"]["api_key"]:
+        if config["api"].get("api_key") == "...":
+            config["api"]["api_key"] = ""
+        if not config["api"].get("api_key"):
             config["api"]["api_key"] = os.environ.get("OPENAI_API_KEY", "")
-        
+
+        try:
+            config["api"]["model"] = Config.normalize_model_name(config["api"].get("model"))
+            config["parameters"]["reasoning_effort"] = Config.normalize_reasoning_effort(
+                config["parameters"].get("reasoning_effort")
+            )
+        except ValueError as e:
+            print(f"Error: {str(e)}", file=sys.stderr)
+            sys.exit(1)
+
         return config
     
     @staticmethod
@@ -1379,6 +1518,7 @@ class CLI:
             model=config["api"]["model"],
             temperature=config["parameters"]["temperature"],
             max_tokens=config["parameters"]["max_tokens"],
+            reasoning_effort=config["parameters"].get("reasoning_effort"),
             system_prompt=config["prompt"]["system_prompt"],
             single_image_prompt=config["prompt"]["single_image_prompt"],
             composite_image_prompt=config["prompt"]["composite_image_prompt"],
@@ -1399,7 +1539,12 @@ class CLI:
     def run() -> None:
         """Run the command-line interface."""
         args = CLI.parse_args()
-        
+
+        if args.write_sample_config:
+            Config.write_sample_config(args.write_sample_config)
+            logger.info(f"Wrote sample config to {args.write_sample_config}")
+            return
+
         # If user didn't supply the path argument, show usage and exit
         if not args.path:
             print("Error: Path to folder or image file is required.", file=sys.stderr)
@@ -1409,7 +1554,7 @@ class CLI:
         config = CLI.get_config(args)
         
         # Check for API key unless we're in a no-API mode
-        if not args.init_tsv and not args.show_composites and not args.make_excel and not config["api"]["api_key"]:
+        if not args.init_tsv and not args.show_composites and not args.make_excel and not config["api"].get("api_key"):
             print("Error: OpenAI API key not provided. Use -k/--api-key, set OPENAI_API_KEY environment variable, or add it to config.json.", file=sys.stderr)
             sys.exit(1)
         

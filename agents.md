@@ -26,6 +26,9 @@ python gid.py /path/to/images --config /path/to/config.json
 # Select a different model
 python gid.py /path/to/images --model gpt-5.5
 
+# Select reasoning effort for supported reasoning models
+python gid.py /path/to/images --reasoning-effort high
+
 # Verbose logging (OpenAI + HTTPX request logs)
 python gid.py /path/to/images --verbose
 ```
@@ -33,7 +36,8 @@ python gid.py /path/to/images --verbose
 ## CLI Flags
 - `path` (positional): folder or image file path
 - `-k`, `--api-key`: OpenAI API key
-- `-m`, `--model`: OpenAI model name
+- `-m`, `--model`: OpenAI model ID, passed directly to the API
+- `--reasoning-effort`: reasoning effort for supported models; choices are `none`, `low`, `medium`, `high`, `xhigh`
 - `-t`, `--temperature`: sampling temperature
 - `-l`, `--length`: max tokens (mapped to `max_output_tokens`)
 - `--init-tsv`: generate TSV with hashes and empty descriptions/context (folder mode only, no API calls)
@@ -41,19 +45,19 @@ python gid.py /path/to/images --verbose
 - `--make-excel`: generate an Excel .xlsx from the existing TSV (folder mode only, no API calls)
 - `--no-composites`: disable automatic composite detection
 - `--show-composites`: list detected composite sets and their matching files (folder mode only)
+- `--write-sample-config [PATH]`: write built-in defaults to a sample config file and exit (default `config.json.sample`)
 - `-n`, `--no-copy`: skip copying in folder mode
 - `-w`, `--workers`: max worker threads (folder mode)
 - `-v`, `--verbose`: enable OpenAI + HTTPX request logs
 - `-c`, `--config`: path to config file
 
 ## Configuration Resolution
-1. Start from `Config.DEFAULT_CONFIG` in `gid.py` (model `latest`, currently resolved to `gpt-5.5`; temperature `1.0`; max tokens `4000`). Prompt text is not hard-coded there.
-2. If a config file exists, deep-merge it:
+1. Start from `Config.DEFAULT_CONFIG` in `gid.py`, which defines the real defaults (model `gpt-5.5`; temperature `1.0`; max tokens `4000`; reasoning effort `medium`; prompt text).
+2. If a user config file exists, deep-merge it over the code defaults:
    - `config.json` in the folder being described, else current directory, else `~/.config/gid/config.json`
-   - The repo includes `config.json.sample` as a starting point.
 3. CLI flags override config values.
 4. `OPENAI_API_KEY` is used only if no API key was provided by file or CLI.
-Note: the CLI help text lists code defaults, but actual values come from the config resolution above. Model aliases `latest`, `gpt-latest`, `gpt-5-latest`, and `5` currently resolve to `gpt-5.5`. API modes require the `prompt` section from config; use `config.json.sample` as the reference.
+Note: local `config.json` should contain only values that need overriding. `config.json.sample` mirrors the code defaults plus documentation placeholders such as `"api_key": "..."`; runtime does not depend on it and it can be regenerated with `--write-sample-config`. Placeholder API keys are treated as unset. Model IDs are passed directly to the OpenAI API; GID does not resolve aliases such as `latest` or `5`. Use `{short_description_max_words}` in prompt text rather than duplicating the numeric word limit.
 
 ## Modes and Output
 - **Folder mode** (path is a directory):
@@ -79,6 +83,7 @@ Note: the CLI help text lists code defaults, but actual values come from the con
 ## OpenAI Call Behavior (Important)
 - Uses the Responses API with `input_image` content and `instructions` for the system prompt.
 - Sends `max_output_tokens=<max_tokens>` and includes `temperature` only when it differs from the default 1.0.
+- Sends `reasoning={"effort": <reasoning_effort>}` from config/CLI. The default is `medium`.
 - If a row has `Context`, it is appended to the prompt as additional image facts (treated as true).
 - Composite rows use `prompt.composite_image_prompt` from config.
 - Short descriptions are trimmed to `short_description_max_words` (default 10).
