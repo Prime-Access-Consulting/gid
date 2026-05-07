@@ -69,6 +69,8 @@ Note: local `config.json` should contain only values that need overriding. `conf
   - Sorts filenames case-insensitively, but processes results in completion order (not strict input order).
 - Writes `descriptions.tsv` (header only if file does not exist):
     - `OriginalFilename`, `ShortDescription`, `LongDescription`, `Context`, `Composite`, `SHA1`
+  - TSV files are UTF-8 with BOM for Excel compatibility.
+  - Multiline descriptions/context are stored as quoted TSV fields with real newlines; legacy literal `\n` values are unescaped when read.
   - Uses SHA-1 hashes to skip files already present in the TSV and to skip duplicates within the same run.
   - If `ShortDescription` or `LongDescription` is empty for a hash, it will be reprocessed to fill in descriptions.
   - `--init-tsv` preserves existing matching rows by default; if content changes under the same filename/base, it preserves context but clears descriptions. `--force-init-tsv` resets rows.

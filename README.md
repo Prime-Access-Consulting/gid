@@ -233,12 +233,12 @@ The default `reasoning_effort` is `medium`; accepted values are `none`, `low`, `
 
 ### Prompt Output Format
 
-The sample prompt asks the model to return exactly two lines:
+The sample prompt asks the model to return two labeled fields:
 
 - `SHORT: <short description>`
 - `LONG: <long description>`
 
-GID strips these labels when saving to the TSV. If the model returns unlabeled two-line output, GID will still treat the first line as short and the remainder as long.
+GID strips these labels when saving to the TSV. The long description may include paragraph breaks after the `LONG:` label. If the model returns unlabeled two-line output, GID will still treat the first line as short and the remainder as long.
 
 ## Output Format
 
@@ -251,6 +251,8 @@ The script generates a tab-separated values (TSV) file with the following column
 4. **Context**: Optional per-image facts provided by a user to improve descriptions
 5. **Composite**: `yes` or `no` (case-insensitive). If `yes`, this row represents a composite image set (auto-detected by filename only when composites are enabled).
 6. **SHA1**: A SHA-1 hash of the image file for deduplication
+
+The TSV is written as UTF-8 with a BOM for better Excel compatibility. Fields that contain paragraph breaks are quoted as TSV fields with real newlines; GID can still read older TSV files that stored newlines as literal `\n` sequences.
 
 ### Excel Output
 
