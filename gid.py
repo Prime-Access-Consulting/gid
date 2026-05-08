@@ -772,7 +772,8 @@ class ImageDescriber:
     GENERIC_LONG_DESCRIPTION_OPENING_PATTERN = re.compile(
         r"^(?:the|this|an?)\s+"
         r"(?:image|photo|photograph|picture|screenshot|screen\s+capture|visual)\s+"
-        r"(?:shows|depicts|features|presents|displays|captures|contains|includes)\b"
+        r"(?:(?:shows|depicts|features|presents|displays|captures|contains|includes)"
+        r"(?:\s+that)?|is|appears\s+to\s+be)\b"
         r"(?:\s+that)?\s*[:,-]?\s*(?P<body>\S.*)$",
         re.IGNORECASE | re.DOTALL
     )
@@ -886,10 +887,11 @@ class ImageDescriber:
         return self._trim_dangling_short_end(short_desc)
 
     def _clean_long_description(self, long_desc: str) -> str:
-        """Clean labels from a long description while preserving paragraph breaks."""
+        """Clean labels and plain-text formatting from a long description."""
         long_desc = self._normalize_response_text(long_desc).strip()
         long_desc = re.sub(self._label_pattern("long"), "", long_desc, count=1, flags=re.IGNORECASE).strip()
-        return self._strip_generic_long_opening(long_desc)
+        long_desc = self._strip_generic_long_opening(long_desc)
+        return self._plain_text_long_description(long_desc)
 
     @classmethod
     def _strip_generic_long_opening(cls, long_desc: str) -> str:
@@ -901,6 +903,16 @@ class ImageDescriber:
         if not body:
             return long_desc
         return body[:1].upper() + body[1:]
+
+    @classmethod
+    def _plain_text_long_description(cls, long_desc: str) -> str:
+        """Collapse a long description to one plain-text paragraph."""
+        long_desc = cls._normalize_response_text(long_desc)
+        long_desc = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", long_desc)
+        long_desc = re.sub(r"(?<!\w)_{1,3}([^_]+?)_{1,3}(?!\w)", r"\1", long_desc)
+        long_desc = re.sub(r"[*`#]+", "", long_desc)
+        long_desc = re.sub(r"\s+", " ", long_desc)
+        return long_desc.strip()
 
     @classmethod
     def description_fields_are_malformed(
@@ -926,6 +938,12 @@ class ImageDescriber:
         if re.search(long_label, long_desc, flags=re.IGNORECASE):
             return True
         if "\n" in short_desc:
+            return True
+        if "\n" in long_desc or "\r" in long_desc:
+            return True
+        if re.search(r"[*`#]", long_desc):
+            return True
+        if re.search(r"(?<!\w)_{1,3}[^_]+?_{1,3}(?!\w)", long_desc):
             return True
         if "_" in short_desc:
             return True

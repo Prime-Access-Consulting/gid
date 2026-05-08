@@ -79,9 +79,9 @@ Prompt fields can be inline prompt text or prompt file references. Bare path-lik
   - Writes `descriptions.tsv` (header only if file does not exist):
     - `OriginalFilename`, `ShortDescription`, `LongDescription`, `Context`, `Composite`, `SHA1`
   - TSV files are plain UTF-8 with one physical row per image.
-  - Newlines inside descriptions/context are stored as literal `\n` sequences so spreadsheet apps keep rows and columns stable.
+  - Long descriptions are collapsed to one plain-text paragraph.
+  - Newlines inside context are stored as literal `\n` sequences so spreadsheet apps keep rows and columns stable.
   - Common smart punctuation is normalized to ASCII punctuation in TSV text fields.
-  - Use `--make-excel` for a spreadsheet with real multiline cells.
   - Uses SHA-1 hashes to skip files already present in the TSV and to skip duplicates within the same run.
   - If `ShortDescription` or `LongDescription` is empty or appears malformed for a hash, including generic long-description openings such as "The image shows", it will be reprocessed to fill in descriptions.
   - `--init-tsv` preserves existing matching rows by default; if content changes under the same filename/base, it preserves context but clears descriptions. `--force-init-tsv` resets rows.

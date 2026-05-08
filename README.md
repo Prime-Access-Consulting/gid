@@ -255,7 +255,7 @@ The bundled instructions prompt asks the model to return two labeled fields:
 - `SHORT: <short description>`
 - `LONG: <long description>`
 
-GID strips these labels when saving to the TSV. The long description may include paragraph breaks after the `LONG:` label. If the model returns a malformed response, GID rejects that result instead of inventing a filename from the long description.
+GID strips these labels when saving to the TSV. The long description is saved as one plain-text paragraph. If the model returns a malformed response, GID rejects that result instead of inventing a filename from the long description.
 
 ## Output Format
 
@@ -269,11 +269,11 @@ The script generates a tab-separated values (TSV) file with the following column
 5. **Composite**: `yes` or `no` (case-insensitive). If `yes`, this row represents a composite image set (auto-detected by filename only when composites are enabled).
 6. **SHA1**: A SHA-1 hash of the image file for deduplication
 
-The TSV is written as plain UTF-8 with one physical row per image. Newlines inside descriptions/context are stored as literal `\n` sequences so spreadsheet apps keep the row and columns stable. Common smart punctuation is normalized to plain ASCII punctuation. Use `--make-excel` when you need a spreadsheet with real multiline cells.
+The TSV is written as plain UTF-8 with one physical row per image. Long descriptions are collapsed to one plain-text paragraph; newlines inside context are stored as literal `\n` sequences so spreadsheet apps keep the row and columns stable. Common smart punctuation is normalized to plain ASCII punctuation.
 
 ### Excel Output
 
-Use `--make-excel` to generate `descriptions.xlsx` in the same folder as the TSV. The spreadsheet uses the same columns, with unescaped text (real newlines and Unicode preserved).
+Use `--make-excel` to generate `descriptions.xlsx` in the same folder as the TSV. The spreadsheet uses the same columns, with context newlines restored and Unicode preserved. Long descriptions remain one plain-text paragraph.
 
 ### Initialize a TSV for Context
 
