@@ -34,8 +34,10 @@ GID is a Python tool for automatically generating human-readable descriptions of
 
 2. Install dependencies:
    ```bash
-   pip install -r requirements.txt
+   python3 -m pip install -r requirements.txt
    ```
+
+   On Windows, use `py -3` or `python` if that command points to Python 3.
 
 3. Set your OpenAI API key (choose one method):
 
@@ -53,7 +55,7 @@ GID is a Python tool for automatically generating human-readable descriptions of
    
    b. Using command-line argument:
    ```bash
-   python gid.py /path/to/images -k your_api_key_here
+   python3 gid.py /path/to/images -k your_api_key_here
    ```
 
 ## Usage
@@ -63,7 +65,7 @@ GID is a Python tool for automatically generating human-readable descriptions of
 #### Process a Folder of Images
 
 ```bash
-python gid.py /path/to/your/images
+python3 gid.py /path/to/your/images
 ```
 
 This will:
@@ -75,7 +77,7 @@ This will:
 #### Process a Single Image
 
 ```bash
-python gid.py /path/to/your/image.jpg
+python3 gid.py /path/to/your/image.jpg
 ```
 
 This will:
@@ -90,7 +92,7 @@ usage: gid.py [-h] [-t TEMPERATURE] [-l LENGTH] [-n] [-k API_KEY] [-w WORKERS]
               [-v] [-c CONFIG] [--init-tsv] [--force-init-tsv] [--make-excel]
               [--composites | --no-composites] [--show-composites]
               [--write-sample-config [PATH]] [-m MODEL] [-p NAME]
-              [--reasoning-effort {none,low,medium,high,xhigh}]
+              [--reasoning-effort {none,low,medium,high,xhigh} | --no-reasoning]
               [path]
 
 positional arguments:
@@ -114,7 +116,7 @@ options:
   --make-excel          Generate an Excel .xlsx file from the existing TSV (folder mode only).
   --composites          Enable automatic composite detection (folder mode only).
   --no-composites       Disable automatic composite detection (default; useful to override config).
-  --show-composites     List discovered composite sets and their matching files (folder mode only; no API calls).
+  --show-composites     List discovered composite sets and their matching files (folder mode only; no API calls or output writes).
   --write-sample-config [PATH]
                         Write built-in defaults to a sample config file and exit (default: config.json.sample).
   -m, --model MODEL     OpenAI model ID to send to the API (default: gpt-5.5).
@@ -122,6 +124,7 @@ options:
   --reasoning-effort {none,low,medium,high,xhigh}
                         Reasoning effort for supported models (default: medium).
                         Choices: none, low, medium, high, xhigh.
+  --no-reasoning        Do not send a reasoning parameter; use this for models that do not support reasoning.
 ```
 
 Temperature defaults to **1.0** unless you override it with `--temperature` or the config file.
@@ -130,62 +133,67 @@ Temperature defaults to **1.0** unless you override it with `--temperature` or t
 
 Process images with higher temperature (more creative descriptions):
 ```bash
-python gid.py /path/to/images --temperature 0.9
+python3 gid.py /path/to/images --temperature 0.9
 ```
 
 Process images but don't copy them (just create descriptions.tsv):
 ```bash
-python gid.py /path/to/images --no-copy
+python3 gid.py /path/to/images --no-copy
 ```
 
 Process images with longer descriptions:
 ```bash
-python gid.py /path/to/images --length 1200
+python3 gid.py /path/to/images --length 1200
 ```
 
 Process images with a specific number of concurrent workers:
 ```bash
-python gid.py /path/to/images --workers 4
+python3 gid.py /path/to/images --workers 4
 ```
 
 Process a single image with higher temperature:
 ```bash
-python gid.py /path/to/image.jpg --temperature 0.9
+python3 gid.py /path/to/image.jpg --temperature 0.9
 ```
 
 Use a higher reasoning effort with the default reasoning model:
 ```bash
-python gid.py /path/to/images --reasoning-effort high
+python3 gid.py /path/to/images --reasoning-effort high
+```
+
+Disable the reasoning parameter for a model that does not support it:
+```bash
+python3 gid.py /path/to/images --model some-model --no-reasoning
 ```
 
 Use a specific model ID:
 ```bash
-python gid.py /path/to/images --model gpt-5.5
+python3 gid.py /path/to/images --model gpt-5.5
 ```
 
 Use a system prompt from `prompts/web.md`:
 ```bash
-python gid.py /path/to/images --prompt web
+python3 gid.py /path/to/images --prompt web
 ```
 
 Enable verbose mode to see detailed API request logs:
 ```bash
-python gid.py /path/to/images --verbose
+python3 gid.py /path/to/images --verbose
 ```
 
 Use a specific config file:
 ```bash
-python gid.py /path/to/images --config /path/to/my-config.json
+python3 gid.py /path/to/images --config /path/to/my-config.json
 ```
 
 Generate an Excel file from an existing TSV (no API calls):
 ```bash
-python gid.py /path/to/images --make-excel
+python3 gid.py /path/to/images --make-excel
 ```
 
 Regenerate the sample config from built-in defaults:
 ```bash
-python gid.py --write-sample-config
+python3 gid.py --write-sample-config
 ```
 
 ### Configuration File
@@ -196,7 +204,7 @@ You can use a JSON configuration file to customize GID's behavior. The config fi
 - `~/.config/gid/config.json` in your home directory
 - Any custom path specified with the `--config` flag
 
-Defaults are defined centrally in `gid.py`. A sample configuration file is provided as `config.json.sample`, but the running program does not depend on it. Your own `config.json` only needs values you want to override. Regenerate the sample at any time with `python gid.py --write-sample-config`. Placeholder values such as `"api_key": "..."` are for documentation and are treated as unset.
+Defaults are defined centrally in `gid.py`. A sample configuration file is provided as `config.json.sample`, but the running program does not depend on it. Your own `config.json` only needs values you want to override. Regenerate the sample at any time with `python3 gid.py --write-sample-config`. Placeholder values such as `"api_key": "..."` are for documentation and are treated as unset.
 
 The configuration file supports the following settings:
 
@@ -209,7 +217,7 @@ The configuration file supports the following settings:
   "parameters": {
     "temperature": 1.0,    // Sampling temperature
     "max_tokens": 4000,    // Maximum response tokens
-    "reasoning_effort": "medium" // none, low, medium, high, or xhigh
+    "reasoning_effort": "medium" // none, low, medium, high, xhigh, or null to omit reasoning
   },
   "processing": {
     "no_copy": false,      // Whether to skip copying files
@@ -236,9 +244,9 @@ Command-line arguments will override settings in the configuration file.
 Use `{context}` in `context_template`; it will be replaced with the row's **Context** value.
 Use `{short_description_max_words}` in prompt text when referring to the configured short-description length, so changing the numeric value updates the rendered prompt.
 Model IDs are passed directly to the OpenAI API. GID does not resolve aliases such as `latest` or `5`.
-The default `reasoning_effort` is `medium`; accepted values are `none`, `low`, `medium`, `high`, and `xhigh`.
+The default `reasoning_effort` is `medium`; accepted values are `none`, `low`, `medium`, `high`, and `xhigh`. Set it to `null` in config or pass `--no-reasoning` to omit the API `reasoning` parameter entirely.
 
-Prompt text fields can be inline strings or Markdown prompt file references. To reference a file, put `web` in a prompt field and GID will load `prompts/web.md`. Prompt directories are searched next to the target folder, next to the active config file, next to the script for bundled prompts, in the current directory, and in `~/.config/gid/prompts`. The `-p/--prompt` flag is a shortcut for overriding `prompt.system_prompt` with one of those prompt files. `prompt.instructions_prompt` is placed before the selected system prompt so reusable output-format instructions stay prominent across prompt variants.
+Prompt fields can use inline prompt text or prompt file references. A bare path-like value such as `web`, `Brief`, `web.md`, or `prompts/web.md` is treated as a prompt file reference, not as inline prompt text; GID must find the referenced Markdown prompt or it exits with an error. Prompt directories are searched next to the target folder, next to the active config file, next to the script for bundled prompts, in the current directory, and in `~/.config/gid/prompts`. The `-p/--prompt` flag is a shortcut for overriding `prompt.system_prompt` with one of those prompt files. `prompt.instructions_prompt` is placed before the selected system prompt so reusable output-format instructions stay prominent across prompt variants. Inline prompt text should be written as the actual prompt prose, usually a full sentence or paragraph.
 
 ### Prompt Output Format
 
@@ -272,7 +280,7 @@ Use `--make-excel` to generate `descriptions.xlsx` in the same folder as the TSV
 To create a TSV with hashes and empty description fields (so someone can fill in Context), run:
 
 ```bash
-python gid.py /path/to/images --init-tsv
+python3 gid.py /path/to/images --init-tsv
 ```
 
 This does not call the API or copy any files. Then add per-image context in the **Context** column and rerun the tool normally. If **ShortDescription** or **LongDescription** is empty or appears malformed, GID will generate descriptions for that row and append the context to the prompt as additional image facts. The **Composite** column is set to `yes` for detected composite rows and `no` for single-image rows.

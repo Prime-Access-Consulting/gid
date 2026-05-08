@@ -329,7 +329,7 @@ class Config:
                 # Deep merge the user config into the default config
                 Config._merge_configs(config, user_config)
 
-                logger.info(f"Loaded configuration from {config_path}")
+                logger.info(f"Loaded configuration from {os.path.abspath(config_path)}")
             except Exception as e:
                 if require_exists:
                     raise ValueError(f"Error loading config from {config_path}: {str(e)}") from e
@@ -470,27 +470,26 @@ class FileHelper:
         return name or "image"
     
     @staticmethod
-    def ensure_described_folder(folder_path: str, output_folder_name: str, no_copy: bool = False) -> str:
+    def described_folder_path(folder_path: str, output_folder_name: str, no_copy: bool = False) -> str:
         """
-        Create output subfolder if it does not exist, unless no_copy is True.
-        
+        Return the folder where TSV output and copied files belong.
+
         Args:
             folder_path: Source folder path
             output_folder_name: Name of output subfolder
-            no_copy: If True, return source folder directly (no subfolder created)
-        
+            no_copy: If True, return source folder directly
+
         Returns:
             Path where TSV and copied files should be placed
         """
         if no_copy:
-            # When no_copy is True, use the source folder directly
             return folder_path
-        else:
-            # Original behavior: create and return subfolder path
-            described_folder_path = os.path.join(folder_path, output_folder_name)
-            if not os.path.isdir(described_folder_path):
-                os.mkdir(described_folder_path)
-            return described_folder_path
+        return os.path.join(folder_path, output_folder_name)
+
+    @staticmethod
+    def ensure_folder(folder_path: str) -> None:
+        """Create a folder if a write operation needs it."""
+        os.makedirs(folder_path, exist_ok=True)
 
 
 class TSVHandler:
@@ -663,6 +662,7 @@ class TSVHandler:
     def write_all(self) -> None:
         """Rewrite the TSV with the current entries."""
         folder = os.path.dirname(self.tsv_path) or "."
+        FileHelper.ensure_folder(folder)
         fd, temp_path = tempfile.mkstemp(
             prefix=f".{os.path.basename(self.tsv_path)}.",
             suffix=".tmp",
@@ -1078,7 +1078,7 @@ class ImageProcessor:
         self.context_template = prompt_config.get("context_template")
         self.short_description_max_words = prompt_config.get("short_description_max_words")
         
-        self.described_folder_path = FileHelper.ensure_described_folder(folder_path, self.output_folder_name, self.no_copy)
+        self.described_folder_path = FileHelper.described_folder_path(folder_path, self.output_folder_name, self.no_copy)
         self.tsv_path = os.path.join(self.described_folder_path, self.tsv_filename)
         self.tsv_handler = TSVHandler(self.tsv_path)
         self.describer = None
@@ -1414,6 +1414,8 @@ class ImageProcessor:
             )
             return
 
+        FileHelper.ensure_folder(self.described_folder_path)
+
         # Build new filename
         _, ext = os.path.splitext(result.image_path)
         base_name = short_desc
@@ -1473,6 +1475,15 @@ class ImageProcessor:
             self.tsv_handler.write_all()
             logger.info("No new images to process.")
             return
+
+        for filename, _image_path, file_hash, context in tasks:
+            self.tsv_handler.upsert_entry(
+                orig_filename=filename,
+                short_desc="",
+                long_desc="",
+                context=context,
+                file_hash=file_hash
+            )
         
         if composite_count:
             logger.info(
@@ -1722,7 +1733,7 @@ class CLI:
         parser.add_argument(
             "--show-composites",
             action="store_true",
-            help="List discovered composite sets and their matching files (folder mode only; no API calls)."
+            help="List discovered composite sets and their matching files (folder mode only; no API calls or output writes)."
         )
         parser.add_argument(
             "--write-sample-config",
@@ -1742,13 +1753,19 @@ class CLI:
             metavar="NAME",
             help="System prompt file name from a prompts/ directory (for example: web for prompts/web.md)."
         )
-        parser.add_argument(
+        reasoning_group = parser.add_mutually_exclusive_group()
+        reasoning_group.add_argument(
             "--reasoning-effort",
             choices=REASONING_EFFORT_VALUES,
             help=(
                 f"Reasoning effort for supported models (default: {DEFAULT_REASONING_EFFORT}). "
                 f"Choices: {', '.join(REASONING_EFFORT_VALUES)}."
             )
+        )
+        reasoning_group.add_argument(
+            "--no-reasoning",
+            action="store_true",
+            help="Do not send a reasoning parameter; use this for models that do not support reasoning."
         )
         
         # If user didn't supply any arguments, show help and exit
@@ -1816,6 +1833,8 @@ class CLI:
             config["_gid"]["required_prompt_reference_fields"].append("system_prompt")
         if args.reasoning_effort:
             config["parameters"]["reasoning_effort"] = args.reasoning_effort
+        if args.no_reasoning:
+            config["parameters"]["reasoning_effort"] = None
         if args.temperature is not None:
             config["parameters"]["temperature"] = args.temperature
         if args.length is not None:

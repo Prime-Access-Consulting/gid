@@ -12,31 +12,34 @@ Generate short and long textual descriptions for images using the OpenAI API. Th
 ## Run Commands
 ```bash
 # Process a folder of images (creates TSV and optional copies)
-python gid.py /path/to/images
+python3 gid.py /path/to/images
 
 # Process a single image (outputs descriptions to console only)
-python gid.py /path/to/image.jpg
+python3 gid.py /path/to/image.jpg
 
 # Override config values
-python gid.py /path/to/images --temperature 0.8 --length 1000 --no-copy
+python3 gid.py /path/to/images --temperature 0.8 --length 1000 --no-copy
 
 # Use a specific config file
-python gid.py /path/to/images --config /path/to/config.json
+python3 gid.py /path/to/images --config /path/to/config.json
 
 # Select a different model
-python gid.py /path/to/images --model gpt-5.5
+python3 gid.py /path/to/images --model gpt-5.5
 
 # Select reasoning effort for supported reasoning models
-python gid.py /path/to/images --reasoning-effort high
+python3 gid.py /path/to/images --reasoning-effort high
+
+# Omit the reasoning parameter for models that do not support it
+python3 gid.py /path/to/images --model some-model --no-reasoning
 
 # Select the system prompt from prompts/web.md
-python gid.py /path/to/images --prompt web
+python3 gid.py /path/to/images --prompt web
 
 # Enable composite detection
-python gid.py /path/to/images --composites
+python3 gid.py /path/to/images --composites
 
 # Verbose logging (OpenAI + HTTPX request logs)
-python gid.py /path/to/images --verbose
+python3 gid.py /path/to/images --verbose
 ```
 
 ## CLI Flags
@@ -45,6 +48,7 @@ python gid.py /path/to/images --verbose
 - `-m`, `--model`: OpenAI model ID, passed directly to the API
 - `-p`, `--prompt`: system prompt file stem from a searched `prompts/` directory, e.g. `web` for `prompts/web.md`
 - `--reasoning-effort`: reasoning effort for supported models; choices are `none`, `low`, `medium`, `high`, `xhigh`
+- `--no-reasoning`: omit the API `reasoning` parameter for models that do not support it
 - `-t`, `--temperature`: sampling temperature
 - `-l`, `--length`: max tokens (mapped to `max_output_tokens`)
 - `--init-tsv`: generate TSV with hashes and empty descriptions/context (folder mode only, no API calls)
@@ -52,7 +56,7 @@ python gid.py /path/to/images --verbose
 - `--make-excel`: generate an Excel .xlsx from the existing TSV (folder mode only, no API calls)
 - `--composites`: enable automatic composite detection (off by default)
 - `--no-composites`: disable automatic composite detection (default; useful to override config)
-- `--show-composites`: list detected composite sets and their matching files (folder mode only, no API calls)
+- `--show-composites`: list detected composite sets and their matching files (folder mode only, no API calls or output writes)
 - `--write-sample-config [PATH]`: write built-in defaults to a sample config file and exit (default `config.json.sample`)
 - `-n`, `--no-copy`: skip copying in folder mode
 - `-w`, `--workers`: max worker threads in folder mode (`0` = auto)
@@ -65,13 +69,13 @@ python gid.py /path/to/images --verbose
    - `config.json` in the folder being described, else current directory, else `~/.config/gid/config.json`
 3. CLI flags override config values.
 4. `OPENAI_API_KEY` is used only if no API key was provided by file or CLI.
-Note: local `config.json` should contain only values that need overriding. `config.json.sample` mirrors the code defaults plus documentation placeholders such as `"api_key": "..."`; runtime does not depend on it and it can be regenerated with `--write-sample-config`. Placeholder API keys are treated as unset. Model IDs are passed directly to the OpenAI API; GID does not resolve aliases such as `latest` or `5`. Use `{short_description_max_words}` in prompt text rather than duplicating the numeric word limit.
-Prompt text fields can be inline strings or prompt file stems. A value such as `web` loads `prompts/web.md`. Prompt directories are searched next to the target folder, next to the active config file, next to the script for bundled prompts, in the current directory, and in `~/.config/gid/prompts`. `-p/--prompt` overrides `prompt.system_prompt` with one of these prompt files. `prompt.instructions_prompt` is placed before the selected system prompt.
+Note: local `config.json` should contain only values that need overriding. `config.json.sample` mirrors the code defaults plus documentation placeholders such as `"api_key": "..."`; runtime does not depend on it and it can be regenerated with `--write-sample-config`. Placeholder API keys are treated as unset. Model IDs are passed directly to the OpenAI API; GID does not resolve aliases such as `latest` or `5`. Use `{short_description_max_words}` in prompt text rather than duplicating the numeric word limit. Set `parameters.reasoning_effort` to `null` or pass `--no-reasoning` to omit the API `reasoning` parameter.
+Prompt fields can be inline prompt text or prompt file references. Bare path-like values such as `web`, `Brief`, `web.md`, or `prompts/web.md` are references, not inline text; missing referenced prompt files are errors. Prompt directories are searched next to the target folder, next to the active config file, next to the script for bundled prompts, in the current directory, and in `~/.config/gid/prompts`. `-p/--prompt` overrides `prompt.system_prompt` with one of these prompt files. `prompt.instructions_prompt` is placed before the selected system prompt.
 
 ## Modes and Output
 - **Folder mode** (path is a directory):
   - Collects images with extensions: `.png .jpg .jpeg .gif .bmp .tiff .webp`
-  - Sorts filenames case-insensitively, but processes results in completion order (not strict input order).
+  - Sorts filenames case-insensitively and preserves that order for new single-image TSV rows, while API calls still run in parallel.
   - Writes `descriptions.tsv` (header only if file does not exist):
     - `OriginalFilename`, `ShortDescription`, `LongDescription`, `Context`, `Composite`, `SHA1`
   - TSV files are plain UTF-8 with one physical row per image.
@@ -96,7 +100,7 @@ Prompt text fields can be inline strings or prompt file stems. A value such as `
 ## OpenAI Call Behavior (Important)
 - Uses the Responses API with `input_image` content and `instructions` for the system prompt.
 - Sends `max_output_tokens=<max_tokens>` and includes `temperature` only when it differs from the default 1.0.
-- Sends `reasoning={"effort": <reasoning_effort>}` from config/CLI. The default is `medium`.
+- Sends `reasoning={"effort": <reasoning_effort>}` from config/CLI unless reasoning is disabled with config `null` or `--no-reasoning`. The default is `medium`.
 - If a row has `Context`, it is appended to the prompt as additional image facts (treated as true).
 - Composite rows use `prompt.composite_image_prompt` from config.
 - Short descriptions are trimmed to `short_description_max_words` (default 10).
