@@ -17,6 +17,12 @@ python3 gid.py /path/to/images
 # Process a single image (outputs descriptions to console only)
 python3 gid.py /path/to/image.jpg
 
+# Recursively process all image-containing folders below cwd
+python3 gid.py --recurse
+
+# Recursively process image-containing folders named final below cwd
+python3 gid.py --recurse final
+
 # Override config values
 python3 gid.py /path/to/images --temperature 0.8 --length 1000 --no-copy
 
@@ -43,7 +49,8 @@ python3 gid.py /path/to/images --verbose
 ```
 
 ## CLI Flags
-- `path` (positional): folder or image file path
+- `path` (positional): folder or image file path; with `--recurse`, a bare name filters matching folder names
+- `--recurse`: recursively process image-containing folders from cwd, or from an explicit root path such as `./photos`; skips generated `Described` folders, hidden folders, source-control folders, and common environment/cache folders
 - `-k`, `--api-key`: OpenAI API key
 - `-m`, `--model`: OpenAI model ID, passed directly to the API
 - `-p`, `--prompt`: system prompt file stem from a searched `prompts/` directory, e.g. `web` for `prompts/web.md`
@@ -96,6 +103,13 @@ Prompt fields can be inline prompt text or prompt file references. Bare path-lik
 - **Single image mode** (path is a file):
   - Outputs short description, then long description to stdout.
   - No files are created.
+- **Recursive mode** (`--recurse`):
+  - With no positional path, starts at the current directory.
+  - With a bare positional name such as `final`, starts at the current directory and processes only image-containing folders whose basename matches.
+  - With an explicit path such as `.` or `./photos`, uses that directory as the recursive root.
+  - Runs folder-mode behavior for each matched folder, respecting other CLI options.
+  - Resolves folder-local config and prompt directories per matched folder unless `--config` is supplied.
+  - Skips generated `Described` folders, hidden folders, source-control folders, and common environment/cache folders.
 
 ## OpenAI Call Behavior (Important)
 - Uses the Responses API with `input_image` content and `instructions` for the system prompt.

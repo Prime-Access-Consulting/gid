@@ -88,18 +88,19 @@ This will:
 ### Command-Line Options
 
 ```
-usage: gid.py [-h] [-t TEMPERATURE] [-l LENGTH] [-n] [-k API_KEY] [-w WORKERS]
-              [-v] [-c CONFIG] [--init-tsv] [--force-init-tsv] [--make-excel]
-              [--composites | --no-composites] [--show-composites]
-              [--write-sample-config [PATH]] [-m MODEL] [-p NAME]
+usage: gid.py [-h] [--recurse] [-t TEMPERATURE] [-l LENGTH] [-n] [-k API_KEY]
+              [-w WORKERS] [-v] [-c CONFIG] [--init-tsv] [--force-init-tsv]
+              [--make-excel] [--composites | --no-composites]
+              [--show-composites] [--write-sample-config [PATH]] [-m MODEL] [-p NAME]
               [--reasoning-effort {none,low,medium,high,xhigh} | --no-reasoning]
               [path]
 
 positional arguments:
-  path                  Path to folder or single image file.
+  path                  Path to folder or single image file. With --recurse, a bare name filters matching folder names.
 
 options:
   -h, --help            show this help message and exit
+  --recurse             Recursively process folders from the current directory. With a bare path value, process only folders with that name.
   -t, --temperature TEMPERATURE
                         Sampling temperature for OpenAI (default=1.0).
   -l, --length LENGTH   Max tokens (default=4000).
@@ -189,6 +190,16 @@ python3 gid.py /path/to/images --config /path/to/my-config.json
 Generate an Excel file from an existing TSV (no API calls):
 ```bash
 python3 gid.py /path/to/images --make-excel
+```
+
+Process every image-containing folder under the current directory:
+```bash
+python3 gid.py --recurse
+```
+
+Process every image-containing folder named `final` under the current directory:
+```bash
+python3 gid.py --recurse final
 ```
 
 Regenerate the sample config from built-in defaults:
@@ -286,6 +297,24 @@ python3 gid.py /path/to/images --init-tsv
 This does not call the API or copy any files. Then add per-image context in the **Context** column and rerun the tool normally. If **ShortDescription** or **LongDescription** is empty or appears malformed, including generic long-description openings such as "The image shows", GID will generate descriptions for that row and append the context to the prompt as additional image facts. The **Composite** column is set to `yes` for detected composite rows and `no` for single-image rows.
 Composite detection is disabled by default. Use `--composites` with `--init-tsv` to add composite rows based on the `base_<number>.<ext>` filename pattern.
 By default, rerunning `--init-tsv` preserves existing rows, context, and descriptions when hashes still match. If a file's hash changes but the filename or composite base still matches, GID preserves the context and clears descriptions so the row will be regenerated. Use `--force-init-tsv` with `--init-tsv` to reset the TSV instead.
+
+### Recursive Processing
+
+Use `--recurse` to run folder-mode processing across multiple folders. With no positional path, GID starts at the current directory and processes each folder that directly contains image files. Generated `Described` folders, hidden folders, common virtual environment folders, and source-control folders are skipped.
+
+If the positional path is a bare folder name, such as `final`, GID still starts at the current directory but only processes matching folders:
+
+```bash
+python3 gid.py --recurse final
+```
+
+If the positional path is an explicit path such as `.` or `./photos`, GID uses that directory as the recursive root:
+
+```bash
+python3 gid.py --recurse ./photos
+```
+
+Other CLI options are respected for every matched folder. Folder-local `config.json` files and `prompts/` directories are resolved per matched folder unless `--config` overrides the config path.
 
 ### Composite Images
 

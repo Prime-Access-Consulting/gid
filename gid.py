@@ -65,6 +65,20 @@ VALID_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp")
 DEFAULT_MODEL = "gpt-5.5"
 REASONING_EFFORT_VALUES = ("none", "low", "medium", "high", "xhigh")
 DEFAULT_REASONING_EFFORT = "medium"
+RECURSE_SKIP_DIR_NAMES = {
+    ".git",
+    ".hg",
+    ".svn",
+    ".venv",
+    "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".tox",
+    "described",
+    "env",
+    "node_modules",
+    "venv"
+}
 
 
 class UnsupportedModelParameterError(ValueError):
@@ -1768,7 +1782,19 @@ class CLI:
                         "OriginalFilename, ShortDescription, LongDescription, Context, Composite, SHA1.\n"
                         "For single image files, outputs descriptions directly."
         )
-        parser.add_argument("path", nargs="?", help="Path to folder or single image file.")
+        parser.add_argument(
+            "path",
+            nargs="?",
+            help="Path to folder or single image file. With --recurse, a bare name filters matching folder names."
+        )
+        parser.add_argument(
+            "--recurse",
+            action="store_true",
+            help=(
+                "Recursively process folders from the current directory. "
+                "With a bare path value, process only folders with that name."
+            )
+        )
         parser.add_argument(
             "-t", "--temperature",
             type=float,
@@ -1891,16 +1917,17 @@ class CLI:
         return args
     
     @staticmethod
-    def get_config(args: argparse.Namespace) -> Dict[str, Any]:
+    def get_config(args: argparse.Namespace, target_path: Optional[str] = None) -> Dict[str, Any]:
         """Load config from file and override with command line args."""
         # Load config from file
         config_path = args.config
         target_dir = None
-        if args.path:
-            if os.path.isdir(args.path):
-                target_dir = args.path
-            elif os.path.isfile(args.path):
-                target_dir = os.path.dirname(args.path)
+        path = target_path if target_path is not None else args.path
+        if path:
+            if os.path.isdir(path):
+                target_dir = path
+            elif os.path.isfile(path):
+                target_dir = os.path.dirname(path)
         if not config_path and target_dir:
             candidate = os.path.join(target_dir, "config.json")
             if os.path.exists(candidate):
@@ -1996,10 +2023,132 @@ class CLI:
         if short_desc == "Error":
             print(f"Error: {long_desc}")
             sys.exit(1)
-            
+
         print(short_desc)
         print(long_desc)
-    
+
+    @staticmethod
+    def is_no_api_mode(args: argparse.Namespace) -> bool:
+        """Return True for modes that do not call the OpenAI API."""
+        return args.init_tsv or args.show_composites or args.make_excel
+
+    @staticmethod
+    def ensure_api_key(args: argparse.Namespace, config: Dict[str, Any]) -> None:
+        """Exit if the active mode needs the API but no API key is configured."""
+        if CLI.is_no_api_mode(args) or config["api"].get("api_key"):
+            return
+        print(
+            "Error: OpenAI API key not provided. Use -k/--api-key, set OPENAI_API_KEY "
+            "environment variable, or add it to config.json.",
+            file=sys.stderr
+        )
+        sys.exit(1)
+
+    @staticmethod
+    def process_folder(folder_path: str, args: argparse.Namespace, config: Dict[str, Any]) -> None:
+        """Run the requested folder-mode action for one folder."""
+        if args.show_composites or args.init_tsv or args.make_excel:
+            processor = ImageProcessor(
+                folder_path=folder_path,
+                config=config,
+                init_only=True
+            )
+            if args.show_composites:
+                processor.show_composites()
+            if args.init_tsv:
+                processor.init_tsv(force=args.force_init_tsv)
+            if args.make_excel:
+                processor.make_excel()
+            return
+
+        processor = ImageProcessor(
+            folder_path=folder_path,
+            config=config
+        )
+        processor.process_all()
+
+    @staticmethod
+    def _path_has_separator(path: str) -> bool:
+        """Return True if a path string contains a platform or common separator."""
+        return "/" in path or "\\" in path
+
+    @staticmethod
+    def _recurse_root_and_match(path: Optional[str]) -> Tuple[str, Optional[str]]:
+        """Resolve --recurse path semantics into a search root and optional folder-name filter."""
+        if not path:
+            return os.getcwd(), None
+
+        expanded_path = os.path.abspath(os.path.expanduser(path))
+        if path in (".", "..") or os.path.isabs(path) or CLI._path_has_separator(path):
+            if not os.path.isdir(expanded_path):
+                raise ValueError(f"Recursive root is not a directory: {path}")
+            return expanded_path, None
+
+        return os.getcwd(), path
+
+    @staticmethod
+    def _has_direct_images(folder_path: str) -> bool:
+        """Return True if a folder directly contains image files."""
+        try:
+            return any(
+                filename.lower().endswith(VALID_EXTENSIONS)
+                for filename in os.listdir(folder_path)
+                if os.path.isfile(os.path.join(folder_path, filename))
+            )
+        except OSError:
+            return False
+
+    @staticmethod
+    def _recurse_make_excel_candidate(folder_path: str) -> bool:
+        """Return True if a folder appears to contain a default TSV for Excel export."""
+        return (
+            os.path.exists(os.path.join(folder_path, Config.DEFAULT_CONFIG["output"]["tsv_filename"]))
+            or os.path.exists(os.path.join(
+                folder_path,
+                Config.DEFAULT_CONFIG["output"]["output_folder_name"],
+                Config.DEFAULT_CONFIG["output"]["tsv_filename"]
+            ))
+        )
+
+    @staticmethod
+    def discover_recurse_folders(args: argparse.Namespace) -> List[str]:
+        """Discover recursive target folders in deterministic order."""
+        root, match_name = CLI._recurse_root_and_match(args.path)
+        match_name_lower = match_name.lower() if match_name else None
+        folders = []
+
+        for current, dirnames, _filenames in os.walk(root):
+            dirnames[:] = sorted(
+                [
+                    dirname for dirname in dirnames
+                    if dirname.lower() not in RECURSE_SKIP_DIR_NAMES
+                    and not dirname.startswith(".")
+                ],
+                key=str.lower
+            )
+            current_name = os.path.basename(current)
+            if match_name_lower and current_name.lower() != match_name_lower:
+                continue
+            if CLI._has_direct_images(current) or (args.make_excel and CLI._recurse_make_excel_candidate(current)):
+                folders.append(current)
+
+        return folders
+
+    @staticmethod
+    def process_recurse(args: argparse.Namespace) -> None:
+        """Run folder-mode processing recursively."""
+        folders = CLI.discover_recurse_folders(args)
+        if not folders:
+            logger.info("No matching folders with direct image files found.")
+            return
+
+        logger.info(f"Recursive mode found {len(folders)} folder{'s' if len(folders) != 1 else ''}.")
+        for index, folder_path in enumerate(folders, start=1):
+            logger.info(f"[{index} of {len(folders)}] {folder_path}")
+            config = CLI.get_config(args, target_path=folder_path)
+            CLI.ensure_api_key(args, config)
+            CLI.process_folder(folder_path, args, config)
+
     @staticmethod
     def run() -> None:
         """Run the command-line interface."""
@@ -2010,41 +2159,29 @@ class CLI:
             logger.info(f"Wrote sample config to {args.write_sample_config}")
             return
 
+        if args.recurse:
+            try:
+                CLI.process_recurse(args)
+            except (FileNotFoundError, ValueError) as e:
+                print(f"Error: {str(e)}", file=sys.stderr)
+                sys.exit(1)
+            return
+
         # If user didn't supply the path argument, show usage and exit
         if not args.path:
             print("Error: Path to folder or image file is required.", file=sys.stderr)
             sys.exit(1)
-        
+
         # Get configuration
         config = CLI.get_config(args)
-        
+
         # Check for API key unless we're in a no-API mode
-        if not args.init_tsv and not args.show_composites and not args.make_excel and not config["api"].get("api_key"):
-            print("Error: OpenAI API key not provided. Use -k/--api-key, set OPENAI_API_KEY environment variable, or add it to config.json.", file=sys.stderr)
-            sys.exit(1)
-        
+        CLI.ensure_api_key(args, config)
+
         try:
             # Check if path is a directory or a file
             if os.path.isdir(args.path):
-                if args.show_composites or args.init_tsv or args.make_excel:
-                    processor = ImageProcessor(
-                        folder_path=args.path,
-                        config=config,
-                        init_only=True
-                    )
-                    if args.show_composites:
-                        processor.show_composites()
-                    if args.init_tsv:
-                        processor.init_tsv(force=args.force_init_tsv)
-                    if args.make_excel:
-                        processor.make_excel()
-                else:
-                    # Process folder
-                    processor = ImageProcessor(
-                        folder_path=args.path,
-                        config=config
-                    )
-                    processor.process_all()
+                CLI.process_folder(args.path, args, config)
             elif os.path.isfile(args.path) and args.path.lower().endswith(VALID_EXTENSIONS):
                 if args.init_tsv:
                     print("Error: --init-tsv is only supported for folder mode.", file=sys.stderr)
