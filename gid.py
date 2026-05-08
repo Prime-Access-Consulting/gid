@@ -772,8 +772,9 @@ class ImageDescriber:
     GENERIC_LONG_DESCRIPTION_OPENING_PATTERN = re.compile(
         r"^(?:the|this|an?)\s+"
         r"(?:image|photo|photograph|picture|screenshot|screen\s+capture|visual)\s+"
-        r"(?:shows|depicts|features|presents|displays|captures|contains|includes)\b",
-        re.IGNORECASE
+        r"(?:shows|depicts|features|presents|displays|captures|contains|includes)\b"
+        r"(?:\s+that)?\s*[:,-]?\s*(?P<body>\S.*)$",
+        re.IGNORECASE | re.DOTALL
     )
     
     def __init__(
@@ -888,7 +889,18 @@ class ImageDescriber:
         """Clean labels from a long description while preserving paragraph breaks."""
         long_desc = self._normalize_response_text(long_desc).strip()
         long_desc = re.sub(self._label_pattern("long"), "", long_desc, count=1, flags=re.IGNORECASE).strip()
-        return long_desc
+        return self._strip_generic_long_opening(long_desc)
+
+    @classmethod
+    def _strip_generic_long_opening(cls, long_desc: str) -> str:
+        """Remove generic image-as-subject boilerplate from a fresh model response."""
+        match = cls.GENERIC_LONG_DESCRIPTION_OPENING_PATTERN.search(long_desc)
+        if not match:
+            return long_desc
+        body = match.group("body").strip()
+        if not body:
+            return long_desc
+        return body[:1].upper() + body[1:]
 
     @classmethod
     def description_fields_are_malformed(
