@@ -1785,14 +1785,17 @@ class CLI:
         parser.add_argument(
             "path",
             nargs="?",
-            help="Path to folder or single image file. With --recurse, a bare name filters matching folder names."
+            help=(
+                "Path to folder or single image file. With --recurse, this must be "
+                "a bare folder name to find."
+            )
         )
         parser.add_argument(
             "--recurse",
             action="store_true",
             help=(
-                "Recursively process folders from the current directory. "
-                "With a bare path value, process only folders with that name."
+                "Recursively process image-containing folders from the current directory. "
+                "An optional positional value filters by folder name."
             )
         )
         parser.add_argument(
@@ -2074,15 +2077,15 @@ class CLI:
 
     @staticmethod
     def _recurse_root_and_match(path: Optional[str]) -> Tuple[str, Optional[str]]:
-        """Resolve --recurse path semantics into a search root and optional folder-name filter."""
+        """Resolve --recurse semantics into cwd plus an optional folder-name filter."""
         if not path:
             return os.getcwd(), None
 
-        expanded_path = os.path.abspath(os.path.expanduser(path))
         if path in (".", "..") or os.path.isabs(path) or CLI._path_has_separator(path):
-            if not os.path.isdir(expanded_path):
-                raise ValueError(f"Recursive root is not a directory: {path}")
-            return expanded_path, None
+            raise ValueError(
+                "--recurse only accepts a bare folder name filter, such as 'final'. "
+                "To recurse from another location, cd there first and run gid.py --recurse."
+            )
 
         return os.getcwd(), path
 

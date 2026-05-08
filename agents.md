@@ -49,8 +49,8 @@ python3 gid.py /path/to/images --verbose
 ```
 
 ## CLI Flags
-- `path` (positional): folder or image file path; with `--recurse`, a bare name filters matching folder names
-- `--recurse`: recursively process image-containing folders from cwd, or from an explicit root path such as `./photos`; skips generated `Described` folders, hidden folders, source-control folders, and common environment/cache folders
+- `path` (positional): folder or image file path; with `--recurse`, this must be a bare folder name filter
+- `--recurse`: recursively process image-containing folders from cwd; optional positional values filter by folder name; skips generated `Described` folders, hidden folders, source-control folders, and common environment/cache folders
 - `-k`, `--api-key`: OpenAI API key
 - `-m`, `--model`: OpenAI model ID, passed directly to the API
 - `-p`, `--prompt`: system prompt file stem from a searched `prompts/` directory, e.g. `web` for `prompts/web.md`
@@ -104,9 +104,10 @@ Prompt fields can be inline prompt text or prompt file references. Bare path-lik
   - Outputs short description, then long description to stdout.
   - No files are created.
 - **Recursive mode** (`--recurse`):
-  - With no positional path, starts at the current directory.
-  - With a bare positional name such as `final`, starts at the current directory and processes only image-containing folders whose basename matches.
-  - With an explicit path such as `.` or `./photos`, uses that directory as the recursive root.
+  - Always starts at the current directory.
+  - With no positional value, processes every image-containing folder below the current directory.
+  - With a bare positional name such as `final`, processes only image-containing folders whose basename matches.
+  - Rejects path-like values such as `.` or `./photos`; change directories first to recurse from another root.
   - Runs folder-mode behavior for each matched folder, respecting other CLI options.
   - Resolves folder-local config and prompt directories per matched folder unless `--config` is supplied.
   - Skips generated `Described` folders, hidden folders, source-control folders, and common environment/cache folders.

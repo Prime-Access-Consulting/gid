@@ -96,11 +96,11 @@ usage: gid.py [-h] [--recurse] [-t TEMPERATURE] [-l LENGTH] [-n] [-k API_KEY]
               [path]
 
 positional arguments:
-  path                  Path to folder or single image file. With --recurse, a bare name filters matching folder names.
+  path                  Path to folder or single image file. With --recurse, this must be a bare folder name to find.
 
 options:
   -h, --help            show this help message and exit
-  --recurse             Recursively process folders from the current directory. With a bare path value, process only folders with that name.
+  --recurse             Recursively process image-containing folders from the current directory. An optional positional value filters by folder name.
   -t, --temperature TEMPERATURE
                         Sampling temperature for OpenAI (default=1.0).
   -l, --length LENGTH   Max tokens (default=4000).
@@ -300,19 +300,15 @@ By default, rerunning `--init-tsv` preserves existing rows, context, and descrip
 
 ### Recursive Processing
 
-Use `--recurse` to run folder-mode processing across multiple folders. With no positional path, GID starts at the current directory and processes each folder that directly contains image files. Generated `Described` folders, hidden folders, common virtual environment folders, and source-control folders are skipped.
+Use `--recurse` to run folder-mode processing across multiple folders. GID starts at the current directory and processes each folder that directly contains image files. Generated `Described` folders, hidden folders, common virtual environment folders, and source-control folders are skipped.
 
-If the positional path is a bare folder name, such as `final`, GID still starts at the current directory but only processes matching folders:
+If the positional value is provided, it must be a bare folder name, such as `final`; GID still starts at the current directory but only processes matching folders:
 
 ```bash
 python3 gid.py --recurse final
 ```
 
-If the positional path is an explicit path such as `.` or `./photos`, GID uses that directory as the recursive root:
-
-```bash
-python3 gid.py --recurse ./photos
-```
+Path-like values such as `.` or `./photos` are rejected in recursive mode. To recurse from another location, change into that directory first and run `python3 /path/to/gid.py --recurse`.
 
 Other CLI options are respected for every matched folder. Folder-local `config.json` files and `prompts/` directories are resolved per matched folder unless `--config` overrides the config path.
 
