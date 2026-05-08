@@ -769,6 +769,12 @@ class ImageDescriber:
         "while",
         "with"
     }
+    GENERIC_LONG_DESCRIPTION_OPENING_PATTERN = re.compile(
+        r"^(?:the|this|an?)\s+"
+        r"(?:image|photo|photograph|picture|screenshot|screen\s+capture|visual)\s+"
+        r"(?:shows|depicts|features|presents|displays|captures|contains|includes)\b",
+        re.IGNORECASE
+    )
     
     def __init__(
         self,
@@ -914,6 +920,8 @@ class ImageDescriber:
         if len(short_desc.split()) > short_description_max_words:
             return True
         if cls._trim_dangling_short_end(short_desc) != short_desc.rstrip(" .,:;"):
+            return True
+        if cls.GENERIC_LONG_DESCRIPTION_OPENING_PATTERN.search(long_desc):
             return True
         return False
 

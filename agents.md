@@ -83,7 +83,7 @@ Prompt fields can be inline prompt text or prompt file references. Bare path-lik
   - Common smart punctuation is normalized to ASCII punctuation in TSV text fields.
   - Use `--make-excel` for a spreadsheet with real multiline cells.
   - Uses SHA-1 hashes to skip files already present in the TSV and to skip duplicates within the same run.
-  - If `ShortDescription` or `LongDescription` is empty or appears malformed for a hash, it will be reprocessed to fill in descriptions.
+  - If `ShortDescription` or `LongDescription` is empty or appears malformed for a hash, including generic long-description openings such as "The image shows", it will be reprocessed to fill in descriptions.
   - `--init-tsv` preserves existing matching rows by default; if content changes under the same filename/base, it preserves context but clears descriptions. `--force-init-tsv` resets rows.
   - Copies images into `Described/` by default; `--no-copy` keeps everything in the source folder.
   - Short description is sanitized for filename safety; collisions are resolved with `" 2"`, `" 3"`, ... up to 100.

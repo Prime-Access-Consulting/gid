@@ -283,7 +283,7 @@ To create a TSV with hashes and empty description fields (so someone can fill in
 python3 gid.py /path/to/images --init-tsv
 ```
 
-This does not call the API or copy any files. Then add per-image context in the **Context** column and rerun the tool normally. If **ShortDescription** or **LongDescription** is empty or appears malformed, GID will generate descriptions for that row and append the context to the prompt as additional image facts. The **Composite** column is set to `yes` for detected composite rows and `no` for single-image rows.
+This does not call the API or copy any files. Then add per-image context in the **Context** column and rerun the tool normally. If **ShortDescription** or **LongDescription** is empty or appears malformed, including generic long-description openings such as "The image shows", GID will generate descriptions for that row and append the context to the prompt as additional image facts. The **Composite** column is set to `yes` for detected composite rows and `no` for single-image rows.
 Composite detection is disabled by default. Use `--composites` with `--init-tsv` to add composite rows based on the `base_<number>.<ext>` filename pattern.
 By default, rerunning `--init-tsv` preserves existing rows, context, and descriptions when hashes still match. If a file's hash changes but the filename or composite base still matches, GID preserves the context and clears descriptions so the row will be regenerated. Use `--force-init-tsv` with `--init-tsv` to reset the TSV instead.
 
