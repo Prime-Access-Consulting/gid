@@ -99,7 +99,7 @@ Prompt fields can be inline prompt text or prompt file references. Bare path-lik
 
 ## OpenAI Call Behavior (Important)
 - Uses the Responses API with `input_image` content and `instructions` for the system prompt.
-- Sends `max_output_tokens=<max_tokens>` and includes `temperature` only when it differs from the default 1.0.
+- Sends `max_output_tokens=<max_tokens>` and includes `temperature` only when it differs from the default 1.0. If a model rejects temperature, GID raises a fatal configuration error instead of processing the rest of the batch.
 - Sends `reasoning={"effort": <reasoning_effort>}` from config/CLI unless reasoning is disabled with config `null` or `--no-reasoning`. The default is `medium`.
 - If a row has `Context`, it is appended to the prompt as additional image facts (treated as true).
 - Composite rows use `prompt.composite_image_prompt` from config.

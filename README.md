@@ -127,7 +127,7 @@ options:
   --no-reasoning        Do not send a reasoning parameter; use this for models that do not support reasoning.
 ```
 
-Temperature defaults to **1.0** unless you override it with `--temperature` or the config file.
+Temperature defaults to **1.0** unless you override it with `--temperature` or the config file. Not every model supports temperature; if the selected model rejects it, GID exits with a clear error instead of continuing through the batch.
 
 ### Examples
 

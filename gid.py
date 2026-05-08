@@ -67,6 +67,10 @@ REASONING_EFFORT_VALUES = ("none", "low", "medium", "high", "xhigh")
 DEFAULT_REASONING_EFFORT = "medium"
 
 
+class UnsupportedModelParameterError(ValueError):
+    """Raised when the selected model rejects a requested API parameter."""
+
+
 def render_prompt_template(
     template: str,
     short_description_max_words: int,
@@ -914,6 +918,18 @@ class ImageDescriber:
         long_desc = re.sub(r"\s+", " ", long_desc)
         return long_desc.strip()
 
+    @staticmethod
+    def _is_unsupported_temperature_error(error: Exception) -> bool:
+        """Return True when the API says this model cannot accept temperature."""
+        message = str(error).lower()
+        return (
+            "temperature" in message
+            and (
+                "unsupported parameter" in message
+                or "not supported with this model" in message
+            )
+        )
+
     @classmethod
     def description_fields_are_malformed(
         cls,
@@ -1071,7 +1087,16 @@ class ImageDescriber:
             if self.reasoning_effort is not None:
                 response_params["reasoning"] = {"effort": self.reasoning_effort}
 
-            response = self.client.responses.create(**response_params)
+            try:
+                response = self.client.responses.create(**response_params)
+            except Exception as e:
+                if "temperature" in response_params and self._is_unsupported_temperature_error(e):
+                    raise UnsupportedModelParameterError(
+                        f"Model '{self.model}' does not support temperature. "
+                        "Remove --temperature / -t or set parameters.temperature to 1.0 in config, "
+                        "or choose a model that supports temperature."
+                    ) from e
+                raise
             
             text_response = response.output_text
             if text_response is None:
@@ -1085,6 +1110,8 @@ class ImageDescriber:
 
             logger.warning(f"Unexpected response format for {image_path}")
             return "Error", "Unexpected response format from API; expected SHORT and LONG labels."
+        except UnsupportedModelParameterError:
+            raise
         except Exception as e:
             logger.error(f"Error describing image {image_path}: {str(e)}")
             return "Error", f"Error: {str(e)}"
@@ -1405,6 +1432,35 @@ class ImageProcessor:
             long_desc=long_desc
         )
 
+    @staticmethod
+    def _job_label(kind: str) -> str:
+        """Return a user-facing label for a queued processing job."""
+        return "composite row" if kind == "composite" else "image"
+
+    def _process_job(self, kind: str, task: Any) -> Optional[Any]:
+        """Process a queued image or composite task."""
+        if kind == "image":
+            return self.process_image(task)
+        return self.process_composite_task(task)
+
+    def _handle_job_result(self, kind: str, result: Any) -> None:
+        """Apply a completed image or composite result."""
+        if kind == "image":
+            self.handle_image_result(result)
+        else:
+            self.handle_composite_result(result)
+
+    def _reserve_image_rows(self, tasks: List[Tuple[str, str, str, str]]) -> None:
+        """Reserve TSV rows for image tasks in task order."""
+        for filename, _image_path, file_hash, context in tasks:
+            self.tsv_handler.upsert_entry(
+                orig_filename=filename,
+                short_desc="",
+                long_desc="",
+                context=context,
+                file_hash=file_hash
+            )
+
     def discover_composites(self) -> List[Tuple[str, List[str]]]:
         """Discover composite sets from sequential underscore-numbered filenames."""
         composites: List[Tuple[str, List[str]]] = []
@@ -1499,6 +1555,10 @@ class ImageProcessor:
         """Process all images in the folder."""
         composite_tasks, skip_filenames = self.collect_composite_tasks()
         tasks = self.collect_image_files(skip_filenames=skip_filenames)
+        jobs: List[Tuple[str, Any]] = (
+            [("image", task) for task in tasks]
+            + [("composite", task) for task in composite_tasks]
+        )
         total_count = len(tasks) + len(composite_tasks)
         composite_count = len(composite_tasks)
         single_image_count = len(tasks)
@@ -1514,15 +1574,6 @@ class ImageProcessor:
             logger.info("No new images to process.")
             return
 
-        for filename, _image_path, file_hash, context in tasks:
-            self.tsv_handler.upsert_entry(
-                orig_filename=filename,
-                short_desc="",
-                long_desc="",
-                context=context,
-                file_hash=file_hash
-            )
-        
         if composite_count:
             logger.info(
                 "Processing "
@@ -1536,20 +1587,34 @@ class ImageProcessor:
 
         # We'll use this to track progress
         done_count = 0
-        
+        if self.temperature is not None and self.temperature != 1.0 and jobs:
+            preflight_kind, preflight_task = jobs.pop(0)
+            if preflight_kind == "image":
+                self._reserve_image_rows([preflight_task])
+            logger.info(f"Checking temperature support with first {self._job_label(preflight_kind)}...")
+            result = self._process_job(preflight_kind, preflight_task)
+            done_count += 1
+            logger.info(f"{done_count} of {total_count} {row_label}")
+            if result:
+                self._handle_job_result(preflight_kind, result)
+
+        self._reserve_image_rows([task for kind, task in jobs if kind == "image"])
+
         try:
             # Parallel describing
             with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
                 future_to_kind = {}
-                for task in tasks:
-                    future_to_kind[executor.submit(self.process_image, task)] = "image"
-                for task in composite_tasks:
-                    future_to_kind[executor.submit(self.process_composite_task, task)] = "composite"
+                for kind, task in jobs:
+                    future_to_kind[executor.submit(self._process_job, kind, task)] = kind
                 
                 for future in as_completed(future_to_kind):
                     result = None
                     try:
                         result = future.result()
+                    except UnsupportedModelParameterError:
+                        for pending_future in future_to_kind:
+                            pending_future.cancel()
+                        raise
                     except Exception as e:
                         logger.error(f"Error processing image task: {str(e)}")
 
@@ -1559,10 +1624,7 @@ class ImageProcessor:
 
                     if result:
                         kind = future_to_kind[future]
-                        if kind == "image":
-                            self.handle_image_result(result)
-                        else:
-                            self.handle_composite_result(result)
+                        self._handle_job_result(kind, result)
         finally:
             # Rewrite TSV with updated entries, including successful results before any failure.
             self.tsv_handler.write_all()
