@@ -89,7 +89,7 @@ This will:
 usage: gid.py [-h] [-t TEMPERATURE] [-l LENGTH] [-n] [-k API_KEY] [-w WORKERS]
               [-v] [-c CONFIG] [--init-tsv] [--force-init-tsv] [--make-excel]
               [--composites | --no-composites] [--show-composites]
-              [--write-sample-config [PATH]] [-m MODEL]
+              [--write-sample-config [PATH]] [-m MODEL] [-p NAME]
               [--reasoning-effort {none,low,medium,high,xhigh}]
               [path]
 
@@ -118,6 +118,7 @@ options:
   --write-sample-config [PATH]
                         Write built-in defaults to a sample config file and exit (default: config.json.sample).
   -m, --model MODEL     OpenAI model ID to send to the API (default: gpt-5.5).
+  -p, --prompt NAME     System prompt file name from a prompts/ directory (for example: web for prompts/web.md).
   --reasoning-effort {none,low,medium,high,xhigh}
                         Reasoning effort for supported models (default: medium).
                         Choices: none, low, medium, high, xhigh.
@@ -160,6 +161,11 @@ python gid.py /path/to/images --reasoning-effort high
 Use a specific model ID:
 ```bash
 python gid.py /path/to/images --model gpt-5.5
+```
+
+Use a system prompt from `prompts/web.md`:
+```bash
+python gid.py /path/to/images --prompt web
 ```
 
 Enable verbose mode to see detailed API request logs:
@@ -216,9 +222,10 @@ The configuration file supports the following settings:
     "tsv_filename": "descriptions.tsv"  // Name of TSV file
   },
   "prompt": {
-    "system_prompt": "...", // Required prompt template
-    "single_image_prompt": "Describe the following image.",
-    "composite_image_prompt": "Describe the following images together as a single composite.",
+    "system_prompt": "default", // Built-in prompts/default.md
+    "instructions_prompt": "instructions", // Built-in prompts/instructions.md placed before system_prompt
+    "single_image_prompt": "Describe the following image using the required SHORT/LONG output format.",
+    "composite_image_prompt": "Describe the following images together as a single composite using the required SHORT/LONG output format.",
     "context_template": "Additional image facts provided by the user (treat as true and naturally incorporate that knowledge if helpful or necessary to inform the description): {context}",
     "short_description_max_words": 10   // Max words in short description
   }
@@ -231,14 +238,16 @@ Use `{short_description_max_words}` in prompt text when referring to the configu
 Model IDs are passed directly to the OpenAI API. GID does not resolve aliases such as `latest` or `5`.
 The default `reasoning_effort` is `medium`; accepted values are `none`, `low`, `medium`, `high`, and `xhigh`.
 
+Prompt text fields can be inline strings or Markdown prompt file references. To reference a file, put `web` in a prompt field and GID will load `prompts/web.md`. Prompt directories are searched next to the target folder, next to the active config file, next to the script for bundled prompts, in the current directory, and in `~/.config/gid/prompts`. The `-p/--prompt` flag is a shortcut for overriding `prompt.system_prompt` with one of those prompt files. `prompt.instructions_prompt` is placed before the selected system prompt so reusable output-format instructions stay prominent across prompt variants.
+
 ### Prompt Output Format
 
-The sample prompt asks the model to return two labeled fields:
+The bundled instructions prompt asks the model to return two labeled fields:
 
 - `SHORT: <short description>`
 - `LONG: <long description>`
 
-GID strips these labels when saving to the TSV. The long description may include paragraph breaks after the `LONG:` label. If the model returns unlabeled two-line output, GID will still treat the first line as short and the remainder as long.
+GID strips these labels when saving to the TSV. The long description may include paragraph breaks after the `LONG:` label. If the model returns a malformed response, GID rejects that result instead of inventing a filename from the long description.
 
 ## Output Format
 
@@ -252,7 +261,7 @@ The script generates a tab-separated values (TSV) file with the following column
 5. **Composite**: `yes` or `no` (case-insensitive). If `yes`, this row represents a composite image set (auto-detected by filename only when composites are enabled).
 6. **SHA1**: A SHA-1 hash of the image file for deduplication
 
-The TSV is written as UTF-8 with a BOM for better Excel compatibility. Fields that contain paragraph breaks are quoted as TSV fields with real newlines; GID can still read older TSV files that stored newlines as literal `\n` sequences.
+The TSV is written as plain UTF-8 with one physical row per image. Newlines inside descriptions/context are stored as literal `\n` sequences so spreadsheet apps keep the row and columns stable. Common smart punctuation is normalized to plain ASCII punctuation. Use `--make-excel` when you need a spreadsheet with real multiline cells.
 
 ### Excel Output
 
@@ -266,7 +275,7 @@ To create a TSV with hashes and empty description fields (so someone can fill in
 python gid.py /path/to/images --init-tsv
 ```
 
-This does not call the API or copy any files. Then add per-image context in the **Context** column and rerun the tool normally. If **ShortDescription** or **LongDescription** is empty, GID will generate descriptions for that row and append the context to the prompt as additional image facts. The **Composite** column is set to `yes` for detected composite rows and `no` for single-image rows.
+This does not call the API or copy any files. Then add per-image context in the **Context** column and rerun the tool normally. If **ShortDescription** or **LongDescription** is empty or appears malformed, GID will generate descriptions for that row and append the context to the prompt as additional image facts. The **Composite** column is set to `yes` for detected composite rows and `no` for single-image rows.
 Composite detection is disabled by default. Use `--composites` with `--init-tsv` to add composite rows based on the `base_<number>.<ext>` filename pattern.
 By default, rerunning `--init-tsv` preserves existing rows, context, and descriptions when hashes still match. If a file's hash changes but the filename or composite base still matches, GID preserves the context and clears descriptions so the row will be regenerated. Use `--force-init-tsv` with `--init-tsv` to reset the TSV instead.
 

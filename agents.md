@@ -29,6 +29,9 @@ python gid.py /path/to/images --model gpt-5.5
 # Select reasoning effort for supported reasoning models
 python gid.py /path/to/images --reasoning-effort high
 
+# Select the system prompt from prompts/web.md
+python gid.py /path/to/images --prompt web
+
 # Enable composite detection
 python gid.py /path/to/images --composites
 
@@ -40,6 +43,7 @@ python gid.py /path/to/images --verbose
 - `path` (positional): folder or image file path
 - `-k`, `--api-key`: OpenAI API key
 - `-m`, `--model`: OpenAI model ID, passed directly to the API
+- `-p`, `--prompt`: system prompt file stem from a searched `prompts/` directory, e.g. `web` for `prompts/web.md`
 - `--reasoning-effort`: reasoning effort for supported models; choices are `none`, `low`, `medium`, `high`, `xhigh`
 - `-t`, `--temperature`: sampling temperature
 - `-l`, `--length`: max tokens (mapped to `max_output_tokens`)
@@ -56,23 +60,26 @@ python gid.py /path/to/images --verbose
 - `-c`, `--config`: path to config file
 
 ## Configuration Resolution
-1. Start from `Config.DEFAULT_CONFIG` in `gid.py`, which defines the real defaults (model `gpt-5.5`; temperature `1.0`; max tokens `4000`; reasoning effort `medium`; composites disabled; max workers `0`; prompt text).
+1. Start from `Config.DEFAULT_CONFIG` in `gid.py`, which defines the real defaults (model `gpt-5.5`; temperature `1.0`; max tokens `4000`; reasoning effort `medium`; composites disabled; max workers `0`; prompt defaults).
 2. If a user config file exists, deep-merge it over the code defaults:
    - `config.json` in the folder being described, else current directory, else `~/.config/gid/config.json`
 3. CLI flags override config values.
 4. `OPENAI_API_KEY` is used only if no API key was provided by file or CLI.
 Note: local `config.json` should contain only values that need overriding. `config.json.sample` mirrors the code defaults plus documentation placeholders such as `"api_key": "..."`; runtime does not depend on it and it can be regenerated with `--write-sample-config`. Placeholder API keys are treated as unset. Model IDs are passed directly to the OpenAI API; GID does not resolve aliases such as `latest` or `5`. Use `{short_description_max_words}` in prompt text rather than duplicating the numeric word limit.
+Prompt text fields can be inline strings or prompt file stems. A value such as `web` loads `prompts/web.md`. Prompt directories are searched next to the target folder, next to the active config file, next to the script for bundled prompts, in the current directory, and in `~/.config/gid/prompts`. `-p/--prompt` overrides `prompt.system_prompt` with one of these prompt files. `prompt.instructions_prompt` is placed before the selected system prompt.
 
 ## Modes and Output
 - **Folder mode** (path is a directory):
   - Collects images with extensions: `.png .jpg .jpeg .gif .bmp .tiff .webp`
   - Sorts filenames case-insensitively, but processes results in completion order (not strict input order).
-- Writes `descriptions.tsv` (header only if file does not exist):
+  - Writes `descriptions.tsv` (header only if file does not exist):
     - `OriginalFilename`, `ShortDescription`, `LongDescription`, `Context`, `Composite`, `SHA1`
-  - TSV files are UTF-8 with BOM for Excel compatibility.
-  - Multiline descriptions/context are stored as quoted TSV fields with real newlines; legacy literal `\n` values are unescaped when read.
+  - TSV files are plain UTF-8 with one physical row per image.
+  - Newlines inside descriptions/context are stored as literal `\n` sequences so spreadsheet apps keep rows and columns stable.
+  - Common smart punctuation is normalized to ASCII punctuation in TSV text fields.
+  - Use `--make-excel` for a spreadsheet with real multiline cells.
   - Uses SHA-1 hashes to skip files already present in the TSV and to skip duplicates within the same run.
-  - If `ShortDescription` or `LongDescription` is empty for a hash, it will be reprocessed to fill in descriptions.
+  - If `ShortDescription` or `LongDescription` is empty or appears malformed for a hash, it will be reprocessed to fill in descriptions.
   - `--init-tsv` preserves existing matching rows by default; if content changes under the same filename/base, it preserves context but clears descriptions. `--force-init-tsv` resets rows.
   - Copies images into `Described/` by default; `--no-copy` keeps everything in the source folder.
   - Short description is sanitized for filename safety; collisions are resolved with `" 2"`, `" 3"`, ... up to 100.
@@ -93,13 +100,13 @@ Note: local `config.json` should contain only values that need overriding. `conf
 - If a row has `Context`, it is appended to the prompt as additional image facts (treated as true).
 - Composite rows use `prompt.composite_image_prompt` from config.
 - Short descriptions are trimmed to `short_description_max_words` (default 10).
-- The sample prompt instructs the model to output:
+- The bundled instructions prompt instructs the model to output:
   - `SHORT: ...` on line 1
   - `LONG: ...` on line 2
 - The response parser accepts:
   - `SHORT:` and `LONG:` labels (with common punctuation like `:` or `-`)
-  - Two-line output (first line short, remaining lines long)
-  - Fallback: first N words (default 10) as the short description
+  - Legacy two-line output only when the first line plausibly fits the short-description field
+  - Malformed responses are rejected instead of using the first words of the long description as the short description
 
 ## Code Style Notes
 - Standard library imports first, then third-party, then local

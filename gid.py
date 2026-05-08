@@ -105,102 +105,13 @@ class Config:
             "tsv_filename": "descriptions.tsv"
         },
         "prompt": {
-            "system_prompt": (
-                "Generate a visual description of static visual content. Translate the visual information into "
-                "clear, useful language for people who may not be able to see the image, while also making the "
-                "description useful to any audience.\n\n"
-                "The description must be accurate, concise, respectful, and organized. Describe what is visible, "
-                "not what you infer beyond the visual evidence. Do not provide art-historical, didactic, "
-                "interpretive, or non-visual commentary unless it is necessary to clarify something visible in "
-                "the image or has been supplied as confirmed context.\n\n"
-                "For the long description, start with an overview sentence. Begin with a plain, uncomplicated "
-                "sentence that identifies the main subject, medium or type of image when relevant, and the "
-                "overall composition or setting. Do not write \"This is an image of...\" Instead, use phrasing "
-                "such as \"A photograph shows...\", \"A painting depicts...\", \"A sculpture presents...\", or "
-                "simply begin with the subject.\n\n"
-                "Organize the long description logically. After the overview, describe the most important visual "
-                "elements in a clear order. Choose the order that best fits the image: left to right, top to "
-                "bottom, foreground to background, center outward, large elements to small details, or another "
-                "structure that makes the image easiest to understand. Use relational orientation. Say \"on our "
-                "left\", \"to the right of the table\", \"behind the person\", or \"she faces us.\" Avoid "
-                "awkward phrasing like \"the viewer faces.\"\n\n"
-                "Prioritize what matters. Start with the elements that are most critical to understanding the "
-                "image. Include details that deepen understanding, but do not exhaustively describe every visible "
-                "feature unless the image requires it. Prioritize the main subject, setting or environment, "
-                "composition, relationships among people or objects, visible action, scale and relative size, "
-                "color, texture, material, style, medium, text appearing in the image, and any details that "
-                "change the meaning or function of the image. Do not include credits, copyright information, or "
-                "metadata that is already available elsewhere.\n\n"
-                "Write for listening. Assume the description may be read aloud by a screen reader. Use complete "
-                "sentences, natural punctuation, and articles such as \"a\", \"an\", and \"the.\" Avoid "
-                "telegraphic fragments. Use active verbs where possible. Avoid jargon. When a technical, art, "
-                "architectural, or cultural term is necessary, define it briefly through context.\n\n"
-                "Handle ambiguity honestly. Do not overstate certainty. If something is unclear, describe the "
-                "visible evidence and preserve the ambiguity. Useful phrases include \"appears to be\", "
-                "\"suggests\", \"possibly\", \"from this angle\", \"upon closer inspection\", and \"the details "
-                "are indistinct.\" Do not invent details that are not visible.\n\n"
-                "Describe people equitably and respectfully. Describe people in proportion to their importance "
-                "in the image. Do not over-describe some people while under-describing others. If a person is "
-                "known, use their name when helpful, but still describe what is visually relevant. Do not use "
-                "proper nouns as a substitute for description.\n\n"
-                "When describing identity-related characteristics, use confirmed self-identification when "
-                "available. If identity is not confirmed, do not assign race, ethnicity, national identity, "
-                "gender identity, disability, or other identity labels based only on appearance. Instead, "
-                "describe relevant visible attributes consistently and respectfully.\n\n"
-                "For skin tone, use clear visual language such as light skin tone, medium-light skin tone, "
-                "medium skin tone, medium-dark skin tone, or dark skin tone, with optional color modifiers when "
-                "useful, such as \"medium brown skin tone\" or \"light pink skin tone with golden undertones.\" "
-                "Do not use food words for skin tone. Do not use \"fair\" as a substitute for light. Avoid "
-                "\"tan\" when it assumes light skin as a baseline.\n\n"
-                "For gender, use known pronouns or confirmed identity when available. If gender is not known, "
-                "use \"person\", \"people\", and they/them pronouns. Do not use \"male\" or \"female\" unless "
-                "referring to confirmed biological sex in a context where that is relevant and provided. "
-                "Describe gender expression visually when relevant: clothing, hairstyle, posture, grooming, "
-                "accessories, or presentation. Avoid judgmental or overly gendered words such as \"pretty\", "
-                "\"handsome\", or \"ladylike.\"\n\n"
-                "For disability, describe apparent disability or access technology when visually relevant, using "
-                "neutral and preferred language. Say \"uses a wheelchair\", not \"wheelchair bound.\" Avoid "
-                "\"impairment\" unless it is part of a specific quoted or official term.\n\n"
-                "For body type, avoid value judgments. Do not use \"healthy\", \"fit\", \"obese\", or "
-                "\"athletic\" as visual description. When relevant, use direct descriptive language such as fat, "
-                "thin, muscular, stocky, lanky, small frame, large frame, or plump.\n\n"
-                "For age, use broad terms such as baby, toddler, child, youth, teen, young adult, adult, or "
-                "older person. Avoid age-based judgments such as \"cute\", \"feeble\", or \"innocent.\"\n\n"
-                "Describe text in the image. Transcribe visible text when it is meaningful. If the text is in a "
-                "non-English language, transcribe it without translating unless translation has been explicitly "
-                "requested. Preserve line breaks or layout when relevant to understanding the image.\n\n"
-                "Adapt to the type of content. For photographs, describe the subject, setting, action, "
-                "composition, lighting if relevant, and relationships among people or objects. For artworks, "
-                "identify the medium when visible or provided. Describe composition, subject, color, material "
-                "qualities, style, and technique. Do not replace visual description with interpretation. For "
-                "sculpture or 3-D objects, make clear that the object is three-dimensional. Describe form, "
-                "material, scale, texture, visible sides or angles, and how parts relate spatially. For "
-                "architecture, start with the type of structure. Describe scale, stories or massing if visible, "
-                "materials, colors, major features, architectural style if relevant, and the surrounding context. "
-                "For outdoor or event photos, establish the setting, environment, event infrastructure, "
-                "participants, visible activities, and spatial arrangement. For charts, diagrams, and "
-                "infographics, do not merely describe the visual appearance. Convey the data, labels, axes, "
-                "trends, relationships, and conclusions available visually. Ensure that all meaningful "
-                "information in the graphic is represented in accessible text.\n\n"
-                "For this workflow, produce both a short description and a long description. The short "
-                "description must be one concise phrase or sentence of no more than "
-                "{short_description_max_words} words. It will be used in a filename on Windows and Mac, so do "
-                "not use characters prohibited in filenames: \\ / : * ? \" < > |. Do not end the short "
-                "description with punctuation. The long description must be one or more clear paragraphs that "
-                "begin with an overview and then elaborate in a logical order. Maintain a clear, direct, "
-                "informative tone. Do not be florid unless the supplied context specifically calls for a more "
-                "poetic or interpretive style.\n\n"
-                "Output only the requested descriptions. Do not explain your process. Do not include caveats "
-                "about being an AI. Do not include headings other than the required SHORT and LONG labels. If "
-                "uncertainty matters, incorporate it directly into the description.\n"
-                "Output exactly these two labeled fields in this order:\n"
-                "SHORT: <short description>\n"
-                "LONG: <long description>\n"
-                "Do not include any other labels or headings. The LONG value may include paragraph breaks if "
-                "useful."
+            "system_prompt": "default",
+            "instructions_prompt": "instructions",
+            "single_image_prompt": "Describe the following image using the required SHORT/LONG output format.",
+            "composite_image_prompt": (
+                "Describe the following images together as a single composite using the required "
+                "SHORT/LONG output format."
             ),
-            "single_image_prompt": "Describe the following image.",
-            "composite_image_prompt": "Describe the following images together as a single composite.",
             "context_template": (
                 "Additional image facts provided by the user (treat as true and naturally incorporate that "
                 "knowledge if helpful or necessary to inform the description): {context}"
@@ -215,10 +126,18 @@ class Config:
     }
     REQUIRED_PROMPT_FIELDS = (
         "system_prompt",
+        "instructions_prompt",
         "single_image_prompt",
         "composite_image_prompt",
         "context_template",
         "short_description_max_words"
+    )
+    PROMPT_FILE_FIELDS = (
+        "system_prompt",
+        "instructions_prompt",
+        "single_image_prompt",
+        "composite_image_prompt",
+        "context_template"
     )
     
     @staticmethod
@@ -264,6 +183,132 @@ class Config:
             f.write("\n")
 
     @staticmethod
+    def user_config_dir() -> str:
+        """Return the user-level GID config directory."""
+        return os.path.expanduser("~/.config/gid")
+
+    @staticmethod
+    def prompt_base_dirs(target_dir: Optional[str], config_path: Optional[str]) -> List[str]:
+        """Return base directories whose prompts/ folders should be searched."""
+        base_dirs = []
+        if target_dir:
+            base_dirs.append(target_dir)
+        if config_path:
+            base_dirs.append(os.path.dirname(os.path.abspath(config_path)) or ".")
+        base_dirs.append(str(Path(__file__).resolve().parent))
+        base_dirs.append(os.getcwd())
+        base_dirs.append(Config.user_config_dir())
+
+        unique_dirs = []
+        seen = set()
+        for base_dir in base_dirs:
+            normalized = os.path.abspath(os.path.expanduser(base_dir))
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            unique_dirs.append(normalized)
+        return unique_dirs
+
+    @staticmethod
+    def prompt_dirs(target_dir: Optional[str], config_path: Optional[str]) -> List[str]:
+        """Return existing prompts/ directories for the active config search scope."""
+        dirs = []
+        for base_dir in Config.prompt_base_dirs(target_dir, config_path):
+            prompt_dir = os.path.join(base_dir, "prompts")
+            if os.path.isdir(prompt_dir):
+                dirs.append(prompt_dir)
+        return dirs
+
+    @staticmethod
+    def _is_prompt_reference(value: str) -> bool:
+        """Return True if a value looks like a prompt file name rather than inline text."""
+        token = value.strip()
+        if not token or "\n" in token or "\r" in token:
+            return False
+        return re.fullmatch(r"[A-Za-z0-9_.~/\\-]+(?:\.md)?", token) is not None
+
+    @staticmethod
+    def _prompt_candidates(reference: str, prompt_dirs: List[str]) -> List[str]:
+        """Return possible prompt file paths for a reference."""
+        reference = reference.strip()
+        candidates = []
+
+        def add(path: str) -> None:
+            normalized = os.path.abspath(os.path.expanduser(path))
+            if normalized not in candidates:
+                candidates.append(normalized)
+
+        expanded_reference = os.path.expanduser(reference)
+        has_path_separator = os.sep in reference or (os.altsep is not None and os.altsep in reference)
+        if os.path.isabs(expanded_reference) or has_path_separator:
+            add(reference)
+            if not reference.lower().endswith(".md"):
+                add(f"{reference}.md")
+
+        for prompt_dir in prompt_dirs:
+            add(os.path.join(prompt_dir, reference))
+            if not reference.lower().endswith(".md"):
+                add(os.path.join(prompt_dir, f"{reference}.md"))
+        return candidates
+
+    @staticmethod
+    def _read_prompt_file(prompt_path: str) -> str:
+        """Read a prompt Markdown file."""
+        with open(prompt_path, "r", encoding="utf-8") as f:
+            return f.read().strip()
+
+    @staticmethod
+    def _resolve_prompt_value(
+        field: str,
+        value: Any,
+        prompt_dirs: List[str],
+        required_reference_fields: Set[str]
+    ) -> Any:
+        """Resolve a prompt config value from prompts/<name>.md when applicable."""
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip()
+        if not stripped:
+            return value
+        is_reference = Config._is_prompt_reference(stripped)
+        if not is_reference and field not in required_reference_fields:
+            return value
+
+        for candidate in Config._prompt_candidates(stripped, prompt_dirs):
+            if os.path.isfile(candidate):
+                return Config._read_prompt_file(candidate)
+
+        if field in required_reference_fields or is_reference:
+            searched = ", ".join(prompt_dirs) if prompt_dirs else "no prompts directories found"
+            raise FileNotFoundError(
+                f"Prompt file not found for prompt.{field}: {stripped!r}. "
+                f"Expected prompts/{stripped}.md in: {searched}"
+            )
+        return value
+
+    @staticmethod
+    def resolve_prompt_references(config: Dict[str, Any]) -> None:
+        """Resolve prompt field file references in-place."""
+        prompt_config = config.get("prompt")
+        if not isinstance(prompt_config, dict):
+            return
+        metadata = config.setdefault("_gid", {})
+        if metadata.get("prompts_resolved"):
+            return
+        prompt_dirs = metadata.setdefault("prompt_dirs", Config.prompt_dirs(None, None))
+        required_reference_fields = set(metadata.setdefault("required_prompt_reference_fields", []))
+        for field in Config.PROMPT_FILE_FIELDS:
+            if field not in prompt_config:
+                continue
+            prompt_config[field] = Config._resolve_prompt_value(
+                field,
+                prompt_config[field],
+                prompt_dirs,
+                required_reference_fields
+            )
+        metadata["prompts_resolved"] = True
+
+    @staticmethod
     def load_config(config_path: Optional[str] = None, require_exists: bool = False) -> Dict[str, Any]:
         """Load configuration from a JSON file."""
         config = copy.deepcopy(Config.DEFAULT_CONFIG)
@@ -304,6 +349,7 @@ class Config:
     @staticmethod
     def validate_prompt_config(config: Dict[str, Any]) -> None:
         """Ensure API prompt settings come from config."""
+        Config.resolve_prompt_references(config)
         prompt_config = config.get("prompt")
         if not isinstance(prompt_config, dict):
             raise ValueError(
@@ -415,11 +461,13 @@ class FileHelper:
     @staticmethod
     def sanitize_filename(name: str) -> str:
         """
-        Replace invalid Windows filename characters (\\/:*?"<>|) with underscores,
+        Replace invalid Windows filename characters (\\/:*?"<>|) with spaces,
         and remove trailing periods/spaces.
         """
-        name = re.sub(r'[\\/:*?"<>|]', "_", name)
-        return name.rstrip(" .")
+        name = re.sub(r'[\\/:*?"<>|]+', " ", name)
+        name = re.sub(r"\s+", " ", name).strip()
+        name = name.rstrip(" .")
+        return name or "image"
     
     @staticmethod
     def ensure_described_folder(folder_path: str, output_folder_name: str, no_copy: bool = False) -> str:
@@ -448,7 +496,21 @@ class FileHelper:
 class TSVHandler:
     """Class to handle TSV file operations."""
 
-    ENCODING = "utf-8-sig"
+    SMART_PUNCTUATION_TRANSLATION = str.maketrans({
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201A": "'",
+        "\u201B": "'",
+        "\u201C": '"',
+        "\u201D": '"',
+        "\u201E": '"',
+        "\u201F": '"',
+        "\u2013": "-",
+        "\u2014": "-",
+        "\u2212": "-",
+        "\u2026": "...",
+        "\u00A0": " "
+    })
     
     def __init__(self, tsv_path: str):
         self.tsv_path = tsv_path
@@ -459,8 +521,14 @@ class TSVHandler:
         self.load()
     
     @staticmethod
+    def _escape_newlines(text: str) -> str:
+        """Escape actual newlines as \\n for single-line TSV rows."""
+        text = text.translate(TSVHandler.SMART_PUNCTUATION_TRANSLATION)
+        return text.replace('\n', '\\n').replace('\r', '\\r')
+
+    @staticmethod
     def _unescape_newlines(text: str) -> str:
-        """Read legacy TSV rows that escaped newlines instead of quoting fields."""
+        """Unescape \\n back to actual newlines when reading."""
         return text.replace('\\n', '\n').replace('\\r', '\r')
 
     def load(self) -> None:
@@ -470,7 +538,7 @@ class TSVHandler:
         if not os.path.exists(self.tsv_path):
             return
         
-        with open(self.tsv_path, "r", encoding=self.ENCODING, newline="") as tsv_file:
+        with open(self.tsv_path, "r", encoding="utf-8-sig", newline="") as tsv_file:
             reader = csv.reader(tsv_file, delimiter="\t")
             try:
                 first_row = next(reader)
@@ -602,7 +670,7 @@ class TSVHandler:
             text=True
         )
         try:
-            with os.fdopen(fd, "w", encoding=self.ENCODING, newline="") as tsv_file:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="") as tsv_file:
                 writer = csv.writer(tsv_file, delimiter="\t", lineterminator="\n")
                 writer.writerow([
                     "OriginalFilename",
@@ -613,12 +681,15 @@ class TSVHandler:
                     "SHA1"
                 ])
                 for entry in self.entries:
+                    escaped_short = self._escape_newlines(entry.short_desc)
+                    escaped_long = self._escape_newlines(entry.long_desc)
+                    escaped_context = self._escape_newlines(entry.context)
                     composite_value = "yes" if entry.composite else "no"
                     writer.writerow([
                         entry.original_filename,
-                        entry.short_desc,
-                        entry.long_desc,
-                        entry.context,
+                        escaped_short,
+                        escaped_long,
+                        escaped_context,
                         composite_value,
                         entry.file_hash
                     ])
@@ -666,6 +737,38 @@ class TSVHandler:
 
 class ImageDescriber:
     """Class to interact with OpenAI API for image description."""
+
+    DANGLING_SHORT_END_WORDS = {
+        "a",
+        "an",
+        "and",
+        "as",
+        "at",
+        "beside",
+        "between",
+        "by",
+        "featuring",
+        "for",
+        "from",
+        "in",
+        "inside",
+        "into",
+        "near",
+        "of",
+        "on",
+        "or",
+        "outside",
+        "over",
+        "showing",
+        "the",
+        "through",
+        "titled",
+        "to",
+        "under",
+        "wearing",
+        "while",
+        "with"
+    }
     
     def __init__(
         self,
@@ -675,6 +778,7 @@ class ImageDescriber:
         max_tokens: int = 4000,
         reasoning_effort: Optional[str] = DEFAULT_REASONING_EFFORT,
         system_prompt: Optional[str] = None,
+        instructions_prompt: Optional[str] = None,
         single_image_prompt: Optional[str] = None,
         composite_image_prompt: Optional[str] = None,
         context_template: Optional[str] = None,
@@ -693,6 +797,8 @@ class ImageDescriber:
         self.client = OpenAI(api_key=api_key)
         if not system_prompt:
             raise ValueError("Missing prompt configuration value: system_prompt.")
+        if not instructions_prompt:
+            raise ValueError("Missing prompt configuration value: instructions_prompt.")
         if not single_image_prompt:
             raise ValueError("Missing prompt configuration value: single_image_prompt.")
         if not composite_image_prompt:
@@ -702,13 +808,161 @@ class ImageDescriber:
         if not isinstance(short_description_max_words, int) or short_description_max_words < 1:
             raise ValueError("prompt.short_description_max_words must be an integer of at least 1.")
         self.short_description_max_words = short_description_max_words
+        combined_system_prompt = f"{instructions_prompt.strip()}\n\n{system_prompt.strip()}"
         self.system_prompt = render_prompt_template(
-            system_prompt,
+            combined_system_prompt,
             self.short_description_max_words
         )
         self.single_image_prompt = single_image_prompt
         self.composite_image_prompt = composite_image_prompt
         self.context_template = context_template
+
+    @staticmethod
+    def _label_pattern(label: str) -> str:
+        """Return a tolerant response label pattern for SHORT/LONG labels."""
+        return rf"(?m)^\s*{label}(?:\s*description|description)?\b\s*(?:[:\uFF1A]|[\-\u2013\u2014]\s+)\s*"
+
+    @staticmethod
+    def _normalize_response_text(text: str) -> str:
+        """Normalize model text before parsing or validating fields."""
+        return (
+            text
+            .replace("\r\n", "\n")
+            .replace("\r", "\n")
+            .replace("\\r\\n", "\n")
+            .replace("\\n", "\n")
+            .replace("\\r", "\n")
+        )
+
+    @staticmethod
+    def _collapse_inline_whitespace(text: str) -> str:
+        """Collapse all whitespace to single spaces."""
+        return re.sub(r"\s+", " ", text).strip()
+
+    @staticmethod
+    def _plain_word(word: str) -> str:
+        """Return a lowercased word stripped of edge punctuation."""
+        return re.sub(r"^[^A-Za-z0-9]+|[^A-Za-z0-9]+$", "", word).lower()
+
+    @classmethod
+    def _trim_dangling_short_end(cls, short_desc: str) -> str:
+        """Remove obvious dangling tail words created by max-word trimming."""
+        short_desc = short_desc.strip().rstrip(" .,:;")
+        if short_desc.count('"') % 2 == 1:
+            short_desc = short_desc[:short_desc.rfind('"')].strip().rstrip(" .,:;")
+
+        while short_desc:
+            words = short_desc.split()
+            if not words:
+                return ""
+
+            if len(words) >= 2:
+                previous_word = cls._plain_word(words[-2])
+                last_word = cls._plain_word(words[-1])
+                if previous_word in cls.DANGLING_SHORT_END_WORDS and last_word.endswith("ing"):
+                    short_desc = " ".join(words[:-1]).strip().rstrip(" .,:;")
+                    continue
+
+            last_word = cls._plain_word(words[-1])
+            if last_word in cls.DANGLING_SHORT_END_WORDS:
+                short_desc = " ".join(words[:-1]).strip().rstrip(" .,:;")
+                continue
+            break
+        return short_desc
+
+    def _clean_short_description(self, short_desc: str) -> str:
+        """Clean a short description without inventing new content."""
+        short_desc = self._normalize_response_text(short_desc)
+        short_desc = re.sub(self._label_pattern("short"), "", short_desc, flags=re.IGNORECASE)
+        short_desc = self._collapse_inline_whitespace(short_desc).strip('"')
+        short_desc = self._limit_short_description(short_desc)
+        return self._trim_dangling_short_end(short_desc)
+
+    def _clean_long_description(self, long_desc: str) -> str:
+        """Clean labels from a long description while preserving paragraph breaks."""
+        long_desc = self._normalize_response_text(long_desc).strip()
+        long_desc = re.sub(self._label_pattern("long"), "", long_desc, count=1, flags=re.IGNORECASE).strip()
+        return long_desc
+
+    @classmethod
+    def description_fields_are_malformed(
+        cls,
+        short_desc: str,
+        long_desc: str,
+        short_description_max_words: int
+    ) -> bool:
+        """Return True when stored descriptions look like parser failures."""
+        short_desc = cls._normalize_response_text(short_desc or "").strip()
+        long_desc = cls._normalize_response_text(long_desc or "").strip()
+        if not short_desc or not long_desc:
+            return True
+
+        short_label = cls._label_pattern("short")
+        long_label = cls._label_pattern("long")
+        if re.search(short_label, short_desc, flags=re.IGNORECASE):
+            return True
+        if re.search(long_label, short_desc, flags=re.IGNORECASE):
+            return True
+        if re.search(short_label, long_desc, flags=re.IGNORECASE):
+            return True
+        if re.search(long_label, long_desc, flags=re.IGNORECASE):
+            return True
+        if "\n" in short_desc:
+            return True
+        if "_" in short_desc:
+            return True
+        if len(short_desc.split()) > short_description_max_words:
+            return True
+        if cls._trim_dangling_short_end(short_desc) != short_desc.rstrip(" .,:;"):
+            return True
+        return False
+
+    def _parse_description_response(self, text_response: str) -> Optional[Tuple[str, str]]:
+        """Parse the model response into short and long descriptions."""
+        text_response = self._normalize_response_text(text_response)
+        short_pattern = self._label_pattern("short")
+        long_pattern = self._label_pattern("long")
+        short_match = re.search(short_pattern, text_response, flags=re.IGNORECASE)
+        long_match = re.search(long_pattern, text_response, flags=re.IGNORECASE)
+        if short_match and long_match and long_match.start() > short_match.end():
+            raw_short_part = text_response[short_match.end():long_match.start()].strip()
+            if "\n" in raw_short_part:
+                return None
+            short_part = self._clean_short_description(raw_short_part)
+            long_part = self._clean_long_description(text_response[long_match.end():])
+            if (
+                short_part and long_part
+                and not self.description_fields_are_malformed(
+                    short_part,
+                    long_part,
+                    self.short_description_max_words
+                )
+            ):
+                return short_part, long_part
+
+        if short_match or long_match:
+            return None
+
+        # Legacy two-line format: first non-empty line is short, rest is long.
+        # Only accept it if the first line plausibly fits the short-description field.
+        lines = [line.strip() for line in text_response.splitlines() if line.strip()]
+        if len(lines) >= 2:
+            first_line = lines[0]
+            first_line_words = first_line.split()
+            if first_line_words and len(first_line_words) <= self.short_description_max_words + 5:
+                short_part = self._clean_short_description(first_line)
+                long_part = self._clean_long_description("\n".join(lines[1:]))
+                if (
+                    short_part and long_part
+                    and not self.description_fields_are_malformed(
+                        short_part,
+                        long_part,
+                        self.short_description_max_words
+                    )
+                ):
+                    return short_part, long_part
+
+        return None
     
     def _limit_short_description(self, short_desc: str) -> str:
         """Trim short description to the configured max word count."""
@@ -787,42 +1041,12 @@ class ImageDescriber:
                 return "Error", "Empty response from API"
             text_response = text_response.strip()
 
-            label_pattern = r"\b{label}\b(?:\s+description)?\s*[:\-\u2013\u2014\uFF1A]?"
-            short_match = re.search(label_pattern.format(label="short"), text_response, flags=re.IGNORECASE)
-            long_match = re.search(label_pattern.format(label="long"), text_response, flags=re.IGNORECASE)
-            if short_match and long_match and long_match.start() > short_match.end():
-                short_part = text_response[short_match.end():long_match.start()].strip()
-                long_part = text_response[long_match.end():].strip()
-                if short_part and long_part:
-                    short_part = self._limit_short_description(short_part)
-                    return short_part, long_part
+            parsed_response = self._parse_description_response(text_response)
+            if parsed_response:
+                return parsed_response
 
-            # Parse two-line format: first non-empty line is short, rest is long
-            lines = [line.strip() for line in text_response.splitlines() if line.strip()]
-            if len(lines) >= 2:
-                short_part = re.sub(
-                    label_pattern.format(label="short"),
-                    "",
-                    lines[0],
-                    flags=re.IGNORECASE
-                ).strip()
-                long_part = "\n".join(lines[1:]).strip()
-                long_part = re.sub(
-                    label_pattern.format(label="long"),
-                    "",
-                    long_part,
-                    flags=re.IGNORECASE
-                ).strip()
-                short_part = self._limit_short_description(short_part)
-                if long_part:
-                    return short_part, long_part
-
-            # Fallback if format is unexpected
             logger.warning(f"Unexpected response format for {image_path}")
-            words = text_response.split()
-            short_desc = " ".join(words[:self.short_description_max_words])
-            short_desc = self._limit_short_description(short_desc)
-            return short_desc, text_response
+            return "Error", "Unexpected response format from API; expected SHORT and LONG labels."
         except Exception as e:
             logger.error(f"Error describing image {image_path}: {str(e)}")
             return "Error", f"Error: {str(e)}"
@@ -848,6 +1072,7 @@ class ImageProcessor:
         self.tsv_filename = config["output"]["tsv_filename"]
         prompt_config = config.get("prompt", {})
         self.system_prompt = prompt_config.get("system_prompt")
+        self.instructions_prompt = prompt_config.get("instructions_prompt")
         self.single_image_prompt = prompt_config.get("single_image_prompt")
         self.composite_image_prompt = prompt_config.get("composite_image_prompt")
         self.context_template = prompt_config.get("context_template")
@@ -866,6 +1091,7 @@ class ImageProcessor:
                 max_tokens=self.max_tokens,
                 reasoning_effort=self.reasoning_effort,
                 system_prompt=self.system_prompt,
+                instructions_prompt=self.instructions_prompt,
                 single_image_prompt=self.single_image_prompt,
                 composite_image_prompt=self.composite_image_prompt,
                 context_template=self.context_template,
@@ -878,7 +1104,17 @@ class ImageProcessor:
             # Enable HTTP request logging in verbose mode
             logging.getLogger("openai").setLevel(logging.INFO)
             logging.getLogger("httpx").setLevel(logging.INFO)
-    
+
+    def entry_needs_description(self, entry: TSVEntry) -> bool:
+        """Return True when a TSV row is missing or has malformed descriptions."""
+        if not entry.short_desc or not entry.long_desc:
+            return True
+        return ImageDescriber.description_fields_are_malformed(
+            entry.short_desc,
+            entry.long_desc,
+            self.short_description_max_words
+        )
+
     def collect_image_files(
         self,
         include_existing: bool = False,
@@ -902,7 +1138,7 @@ class ImageProcessor:
                 image_path = os.path.join(self.folder_path, filename)
                 file_hash = FileHelper.hash_file(image_path)
                 entry = self.tsv_handler.get_entry(file_hash)
-                if entry and entry.short_desc and entry.long_desc and not include_existing:
+                if entry and not include_existing and not self.entry_needs_description(entry):
                     continue
                 # Skip if queued
                 if file_hash in pending_hashes:
@@ -1100,7 +1336,7 @@ class ImageProcessor:
 
             composite_hash = self._compute_composite_hash(files)
             previous_hash = entry.file_hash
-            if entry.short_desc and entry.long_desc and previous_hash == composite_hash:
+            if not self.entry_needs_description(entry) and previous_hash == composite_hash:
                 continue
             tasks.append((entry, files, composite_hash))
 
@@ -1501,6 +1737,12 @@ class CLI:
             help=f"OpenAI model ID to send to the API (default: {DEFAULT_MODEL})."
         )
         parser.add_argument(
+            "-p", "--prompt",
+            type=str,
+            metavar="NAME",
+            help="System prompt file name from a prompts/ directory (for example: web for prompts/web.md)."
+        )
+        parser.add_argument(
             "--reasoning-effort",
             choices=REASONING_EFFORT_VALUES,
             help=(
@@ -1536,16 +1778,18 @@ class CLI:
         """Load config from file and override with command line args."""
         # Load config from file
         config_path = args.config
-        if not config_path and args.path:
-            target_dir = None
+        target_dir = None
+        if args.path:
             if os.path.isdir(args.path):
                 target_dir = args.path
             elif os.path.isfile(args.path):
                 target_dir = os.path.dirname(args.path)
-            if target_dir:
-                candidate = os.path.join(target_dir, "config.json")
-                if os.path.exists(candidate):
-                    config_path = candidate
+        if not config_path and target_dir:
+            candidate = os.path.join(target_dir, "config.json")
+            if os.path.exists(candidate):
+                config_path = candidate
+        if not config_path:
+            config_path = Config.find_config_file()
         try:
             config = Config.load_config(config_path, require_exists=bool(args.config))
         except (FileNotFoundError, ValueError) as e:
@@ -1556,12 +1800,20 @@ class CLI:
         config.setdefault("parameters", {})
         config.setdefault("processing", {})
         config.setdefault("output", {})
+        config.setdefault("prompt", {})
+        config["_gid"] = {
+            "prompt_dirs": Config.prompt_dirs(target_dir, config_path),
+            "required_prompt_reference_fields": []
+        }
 
         # Override with command line args
         if args.api_key:
             config["api"]["api_key"] = args.api_key
         if args.model:
             config["api"]["model"] = args.model
+        if args.prompt:
+            config["prompt"]["system_prompt"] = args.prompt
+            config["_gid"]["required_prompt_reference_fields"].append("system_prompt")
         if args.reasoning_effort:
             config["parameters"]["reasoning_effort"] = args.reasoning_effort
         if args.temperature is not None:
@@ -1591,7 +1843,7 @@ class CLI:
                 config["parameters"].get("reasoning_effort")
             )
             Config.normalize_max_workers(config["processing"].get("max_workers"))
-        except ValueError as e:
+        except (FileNotFoundError, ValueError) as e:
             print(f"Error: {str(e)}", file=sys.stderr)
             sys.exit(1)
 
@@ -1613,6 +1865,7 @@ class CLI:
             max_tokens=config["parameters"]["max_tokens"],
             reasoning_effort=config["parameters"].get("reasoning_effort"),
             system_prompt=config["prompt"]["system_prompt"],
+            instructions_prompt=config["prompt"]["instructions_prompt"],
             single_image_prompt=config["prompt"]["single_image_prompt"],
             composite_image_prompt=config["prompt"]["composite_image_prompt"],
             context_template=config["prompt"]["context_template"],
@@ -1691,7 +1944,7 @@ class CLI:
             else:
                 print(f"Error: '{args.path}' is not a valid directory or image file.", file=sys.stderr)
                 sys.exit(1)
-        except ValueError as e:
+        except (FileNotFoundError, ValueError) as e:
             print(f"Error: {str(e)}", file=sys.stderr)
             sys.exit(1)
 
