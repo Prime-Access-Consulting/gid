@@ -872,6 +872,12 @@ class ImageDescriber:
             raise ValueError("Missing prompt configuration value: short_retry_prompt.")
         if not isinstance(short_description_max_words, int) or short_description_max_words < 1:
             raise ValueError("prompt.short_description_max_words must be an integer of at least 1.")
+        for field_name, value in (("system_prompt", system_prompt), ("instructions_prompt", instructions_prompt)):
+            if Config._is_prompt_reference(value):
+                raise ValueError(
+                    f"prompt.{field_name} is the unresolved prompt file reference {value.strip()!r}. "
+                    "Prompt references must be resolved before the describer is created."
+                )
         self.short_description_max_words = short_description_max_words
         combined_system_prompt = f"{instructions_prompt.strip()}\n\n{system_prompt.strip()}"
         self.system_prompt = render_prompt_template(
@@ -1279,7 +1285,8 @@ class ImageDescriber:
                 format_attempts += 1
                 logger.info(
                     f"Response for {label} {problem_text}; asking the model to try again "
-                    f"({format_attempts} of {self.MAX_FORMAT_RETRIES})."
+                    f"({format_attempts} of {self.MAX_FORMAT_RETRIES}). "
+                    f"Rejected response begins: \"{self._collapse_inline_whitespace(text_response)[:200]}\""
                 )
                 text_response = self._retry_for_format(response_params, text_response, problems, label)
                 parsed = self._parse_description_response(text_response)
@@ -1300,7 +1307,7 @@ class ImageDescriber:
                 short_attempts += 1
                 logger.info(
                     f"Short description for {label} {problem_text}; asking the model to rewrite it "
-                    f"({short_attempts} of {self.MAX_SHORT_RETRIES})."
+                    f"({short_attempts} of {self.MAX_SHORT_RETRIES}). Rejected: \"{short_desc}\""
                 )
                 short_desc = self._retry_for_short(short_desc, long_desc, problems, label)
 
@@ -1330,6 +1337,10 @@ class ImageProcessor:
         self.verbose = config["processing"]["verbose"]
         self.output_folder_name = config["output"]["output_folder_name"]
         self.tsv_filename = config["output"]["tsv_filename"]
+        if not init_only:
+            # Resolve prompt file references (for example "default" -> prompts/default.md)
+            # before reading the prompt fields, otherwise the bare names get sent to the model.
+            Config.validate_prompt_config(config)
         prompt_config = config.get("prompt", {})
         self.system_prompt = prompt_config.get("system_prompt")
         self.instructions_prompt = prompt_config.get("instructions_prompt")
@@ -1345,7 +1356,6 @@ class ImageProcessor:
         self.tsv_handler = TSVHandler(self.tsv_path)
         self.describer = None
         if not init_only:
-            Config.validate_prompt_config(config)
             self.describer = ImageDescriber(
                 api_key=self.api_key,
                 model=self.model,
