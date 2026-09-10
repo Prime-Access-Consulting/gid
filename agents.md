@@ -72,12 +72,13 @@ python3 gid.py /path/to/images --verbose
 
 ## Configuration Resolution
 1. Start from `Config.DEFAULT_CONFIG` in `gid.py`, which defines the real defaults (model `gpt-5.5`; temperature `1.0`; max tokens `4000`; reasoning effort `medium`; composites disabled; max workers `0`; prompt defaults).
-2. If a user config file exists, deep-merge it over the code defaults:
-   - `config.json` in the folder being described, else current directory, else `~/.config/gid/config.json`
+2. If a user config file exists, deep-merge it over the code defaults. The first match wins:
+   - `--config` path, else `config.json` in the folder being described (for a single image, its folder), else `config.json` next to `gid.py`, else `~/.config/gid/config.json`
+   - The current working directory is never searched
 3. CLI flags override config values.
 4. `OPENAI_API_KEY` is used only if no API key was provided by file or CLI.
 Note: local `config.json` should contain only values that need overriding. `config.json.sample` mirrors the code defaults plus documentation placeholders such as `"api_key": "..."`; runtime does not depend on it and it can be regenerated with `--write-sample-config`. Placeholder API keys are treated as unset. Model IDs are passed directly to the OpenAI API; GID does not resolve aliases such as `latest` or `5`. Use `{short_description_max_words}` in prompt text rather than duplicating the numeric word limit. Set `parameters.reasoning_effort` to `null` or pass `--no-reasoning` to omit the API `reasoning` parameter.
-Prompt fields can be inline prompt text or prompt file references. Bare path-like values such as `web`, `Brief`, `web.md`, or `prompts/web.md` are references, not inline text; missing referenced prompt files are errors. Prompt directories are searched next to the target folder, next to the active config file, next to the script for bundled prompts, in the current directory, and in `~/.config/gid/prompts`. `-p/--prompt` overrides `prompt.system_prompt` with one of these prompt files. `prompt.instructions_prompt` is placed before the selected system prompt.
+Prompt fields can be inline prompt text or prompt file references. Bare path-like values such as `web`, `Brief`, `web.md`, or `prompts/web.md` are references, not inline text; missing referenced prompt files are errors. Prompt directories are searched in the same order: next to the target folder, next to the active config file, next to `gid.py` for bundled prompts, and in `~/.config/gid/prompts`; never the current working directory. `-p/--prompt` overrides `prompt.system_prompt` with one of these prompt files. `prompt.instructions_prompt` is placed before the selected system prompt.
 
 ## Modes and Output
 - **Folder mode** (path is a directory):

@@ -202,19 +202,48 @@ class Config:
         "short_retry_prompt"
     )
     
+    CONFIG_FILENAME = "config.json"
+
     @staticmethod
-    def find_config_file() -> Optional[str]:
-        """Find the config file in standard locations."""
-        # Check current directory first
-        if os.path.exists("config.json"):
-            return "config.json"
-        
-        # Check user config directory
-        user_config_dir = os.path.expanduser("~/.config/gid")
-        user_config_file = os.path.join(user_config_dir, "config.json")
-        if os.path.exists(user_config_file):
-            return user_config_file
-        
+    def script_dir() -> str:
+        """Return the folder containing gid.py, where bundled prompts and an optional config live."""
+        return str(Path(__file__).resolve().parent)
+
+    @staticmethod
+    def _unique_dirs(dirs: List[Optional[str]]) -> List[str]:
+        """Normalize folder paths, dropping empties and duplicates while keeping order."""
+        unique: List[str] = []
+        for base_dir in dirs:
+            if not base_dir:
+                continue
+            normalized = os.path.abspath(os.path.expanduser(base_dir))
+            if normalized not in unique:
+                unique.append(normalized)
+        return unique
+
+    @staticmethod
+    def target_dir_for(path: Optional[str]) -> Optional[str]:
+        """Return the folder a target refers to: the folder itself, or the folder holding an image file."""
+        if not path:
+            return None
+        if os.path.isdir(path):
+            return path
+        if os.path.isfile(path):
+            return os.path.dirname(os.path.abspath(path))
+        return None
+
+    @staticmethod
+    def config_search_dirs(target_dir: Optional[str] = None) -> List[str]:
+        """Folders searched for config.json, highest priority first."""
+        return Config._unique_dirs([target_dir, Config.script_dir(), Config.user_config_dir()])
+
+    @staticmethod
+    def find_config_file(target_dir: Optional[str] = None) -> Optional[str]:
+        """Return the first config.json found in the search folders, or None."""
+        for base_dir in Config.config_search_dirs(target_dir):
+            candidate = os.path.join(base_dir, Config.CONFIG_FILENAME)
+            if os.path.isfile(candidate):
+                return candidate
         return None
 
     @staticmethod
@@ -251,25 +280,9 @@ class Config:
 
     @staticmethod
     def prompt_base_dirs(target_dir: Optional[str], config_path: Optional[str]) -> List[str]:
-        """Return base directories whose prompts/ folders should be searched."""
-        base_dirs = []
-        if target_dir:
-            base_dirs.append(target_dir)
-        if config_path:
-            base_dirs.append(os.path.dirname(os.path.abspath(config_path)) or ".")
-        base_dirs.append(str(Path(__file__).resolve().parent))
-        base_dirs.append(os.getcwd())
-        base_dirs.append(Config.user_config_dir())
-
-        unique_dirs = []
-        seen = set()
-        for base_dir in base_dirs:
-            normalized = os.path.abspath(os.path.expanduser(base_dir))
-            if normalized in seen:
-                continue
-            seen.add(normalized)
-            unique_dirs.append(normalized)
-        return unique_dirs
+        """Folders whose prompts/ subfolder is searched, highest priority first."""
+        config_dir = os.path.dirname(os.path.abspath(config_path)) if config_path else None
+        return Config._unique_dirs([target_dir, config_dir, Config.script_dir(), Config.user_config_dir()])
 
     @staticmethod
     def prompt_dirs(target_dir: Optional[str], config_path: Optional[str]) -> List[str]:
@@ -372,31 +385,21 @@ class Config:
 
     @staticmethod
     def load_config(config_path: Optional[str] = None, require_exists: bool = False) -> Dict[str, Any]:
-        """Load configuration from a JSON file."""
+        """Return the built-in defaults, deep-merged with the JSON file at config_path when given."""
         config = copy.deepcopy(Config.DEFAULT_CONFIG)
-
-        # If no config path provided, try to find one
         if not config_path:
-            config_path = Config.find_config_file()
-        
-        # If we found a config file, load and merge it
-        if config_path:
-            if not os.path.exists(config_path):
-                if require_exists:
-                    raise FileNotFoundError(f"Config file not found: {config_path}")
-                return config
-            try:
-                user_config = Config._load_json_config(config_path)
-                
-                # Deep merge the user config into the default config
-                Config._merge_configs(config, user_config)
-
-                logger.info(f"Loaded configuration from {os.path.abspath(config_path)}")
-            except Exception as e:
-                if require_exists:
-                    raise ValueError(f"Error loading config from {config_path}: {str(e)}") from e
-                logger.warning(f"Error loading config from {config_path}: {str(e)}")
-        
+            return config
+        if not os.path.exists(config_path):
+            if require_exists:
+                raise FileNotFoundError(f"Config file not found: {config_path}")
+            return config
+        try:
+            Config._merge_configs(config, Config._load_json_config(config_path))
+            logger.info(f"Loaded configuration from {os.path.abspath(config_path)}")
+        except Exception as e:
+            if require_exists:
+                raise ValueError(f"Error loading config from {config_path}: {str(e)}") from e
+            logger.warning(f"Error loading config from {config_path}: {str(e)}")
         return config
     
     @staticmethod
@@ -2026,7 +2029,7 @@ class CLI:
         parser.add_argument(
             "-c", "--config",
             type=str,
-            help="Path to the configuration file (default: config.json in the target folder, current directory, or ~/.config/gid/config.json)"
+            help="Path to the configuration file (default: config.json in the folder being described, then next to gid.py, then ~/.config/gid/config.json)"
         )
         parser.add_argument(
             "--init-tsv",
@@ -2117,21 +2120,8 @@ class CLI:
     @staticmethod
     def get_config(args: argparse.Namespace, target_path: Optional[str] = None) -> Dict[str, Any]:
         """Load config from file and override with command line args."""
-        # Load config from file
-        config_path = args.config
-        target_dir = None
-        path = target_path if target_path is not None else args.path
-        if path:
-            if os.path.isdir(path):
-                target_dir = path
-            elif os.path.isfile(path):
-                target_dir = os.path.dirname(path)
-        if not config_path and target_dir:
-            candidate = os.path.join(target_dir, "config.json")
-            if os.path.exists(candidate):
-                config_path = candidate
-        if not config_path:
-            config_path = Config.find_config_file()
+        target_dir = Config.target_dir_for(target_path if target_path is not None else args.path)
+        config_path = args.config or Config.find_config_file(target_dir)
         try:
             config = Config.load_config(config_path, require_exists=bool(args.config))
         except (FileNotFoundError, ValueError) as e:
