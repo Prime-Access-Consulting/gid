@@ -12,6 +12,7 @@ GID is a Python CLI for generating short, filename-friendly image descriptions a
 - Optionally copies described images into a `Described/` folder using sanitized short descriptions as filenames.
 - Can skip copying with `--no-copy` and keep all output in the source folder.
 - Can export an existing TSV to `descriptions.xlsx` with `--make-excel`.
+- Transcribes every piece of visible text word for word in the long description, and never truncates short descriptions: an over-long or mid-phrase short description is sent back to the model for a rewrite.
 - Supports prompt files, custom config files, model overrides, reasoning controls, and temperature/max-token settings.
 - Supports optional composite detection for filename sequences such as `base_1.jpg`, `base_2.jpg`, `base_3.jpg`.
 
@@ -20,7 +21,7 @@ GID is a Python CLI for generating short, filename-friendly image descriptions a
 ### Prerequisites
 
 - Python 3.7+
-- An OpenAI API key with access to the configured model. The default model ID is `gpt-5.5`.
+- An OpenAI API key with access to the configured model. The default model ID is `gpt-5.6`.
 
 ### Setup
 
@@ -129,7 +130,7 @@ This does not call the API. It writes `descriptions.xlsx` next to the TSV.
 Use a specific model:
 
 ```bash
-python3 gid.py /path/to/images --model gpt-5.5
+python3 gid.py /path/to/images --model gpt-5.6
 ```
 
 Adjust temperature:
@@ -145,6 +146,8 @@ Adjust max output tokens:
 ```bash
 python3 gid.py /path/to/images --length 1200
 ```
+
+The `--length` value is the model's whole output budget, including any reasoning tokens. If a response is cut off at that limit, GID retries once with double the budget and reports an error for that image if it is still cut off, rather than saving a truncated description.
 
 Set reasoning effort for models that support it:
 
@@ -212,9 +215,11 @@ GID starts from defaults defined in `gid.py`, then merges config file values, th
 
 If `--config` is supplied, GID uses that file for every target and the file must exist. Otherwise, config files are searched in this order:
 
-1. `config.json` in the target folder
-2. `config.json` in the current directory
+1. `config.json` in the target folder (for a single image, the folder that holds it)
+2. `config.json` next to `gid.py`
 3. `~/.config/gid/config.json`
+
+The current working directory is not searched, so running GID from a different folder never changes the result.
 
 Placeholder API keys such as `"..."` are treated as unset, so `OPENAI_API_KEY` can still provide the key.
 
@@ -224,7 +229,7 @@ The config file is strict JSON. Comments are not allowed in the file itself.
 {
   "api": {
     "api_key": "...",
-    "model": "gpt-5.5"
+    "model": "gpt-5.6"
   },
   "parameters": {
     "temperature": 1.0,
@@ -247,6 +252,8 @@ The config file is strict JSON. Comments are not allowed in the file itself.
     "single_image_prompt": "Describe the following image using the required SHORT/LONG output format.",
     "composite_image_prompt": "Describe the following images together as a single composite using the required SHORT/LONG output format.",
     "context_template": "Additional image facts provided by the user (treat as true and naturally incorporate that knowledge if helpful or necessary to inform the description): {context}",
+    "format_retry_prompt": "Your previous response was rejected because it {problems}. The rejected response was:\n\n{previous_response}\n\nDescribe the image or images again, following the required SHORT/LONG output format exactly.",
+    "short_retry_prompt": "The short description below was rejected because it {problems}. Rewrite it as a complete, self-contained phrase of no more than {short_description_max_words} words that names the main subject. Keep the original meaning, and use the long description only to decide what matters most. Do not use quotation marks of any kind or the characters \\ / : * ? \" < > |. Do not end with punctuation, an article, a preposition, a conjunction, or a possessive. Reply with exactly one line in the form: SHORT: <short description>\n\nRejected short description: {short_description}\n\nLong description: {long_description}",
     "short_description_max_words": 10
   }
 }
@@ -259,14 +266,16 @@ Key settings:
 | `api.api_key` | Optional; prefer `OPENAI_API_KEY` or `--api-key` for secrets. |
 | `api.model` | Model ID passed directly to the OpenAI API. GID does not resolve aliases such as `latest` or `5`. |
 | `parameters.temperature` | Sampling temperature. Not every model supports this parameter. |
-| `parameters.max_tokens` | Maximum response tokens, mapped to `max_output_tokens`. |
+| `parameters.max_tokens` | Maximum response tokens, mapped to `max_output_tokens`, which includes reasoning tokens. A response cut off at this limit is retried once with double the budget. |
 | `parameters.reasoning_effort` | `none`, `low`, `medium`, `high`, `xhigh`, or `null` to omit reasoning. |
 | `processing.no_copy` | `true` writes TSV output in the source folder instead of `Described/`. |
 | `processing.no_composites` | `true` disables automatic composite detection. |
 | `processing.max_workers` | Maximum worker threads in folder mode; `0` means auto. |
 | `output.output_folder_name` | Folder used for copied output and TSVs when copying is enabled. |
 | `output.tsv_filename` | TSV filename. |
-| `prompt.short_description_max_words` | Maximum words in the short description. |
+| `prompt.format_retry_prompt` | Sent with the images, once, when a response breaks the SHORT/LONG layout. Placeholders: `{problems}`, `{previous_response}`. |
+| `prompt.short_retry_prompt` | Sent text-only, up to twice, when the short description is too long or ends mid-phrase. Placeholders: `{problems}`, `{short_description}`, `{long_description}`. |
+| `prompt.short_description_max_words` | Maximum words in the short description. Never enforced by truncation; see Prompt Behavior. |
 
 Regenerate the sample config from built-in defaults:
 
@@ -283,12 +292,13 @@ Prompt directories are searched in this order:
 1. `prompts/` next to the target folder
 2. `prompts/` next to the active config file
 3. Bundled `prompts/` next to `gid.py`
-4. `prompts/` in the current directory
-5. `~/.config/gid/prompts`
+4. `~/.config/gid/prompts`
+
+As with config files, the current working directory is not searched.
 
 `--prompt NAME` overrides `prompt.system_prompt` with one of those prompt files. `prompt.instructions_prompt` is placed before the selected system prompt so reusable output-format instructions stay prominent across prompt variants.
 
-Use `{context}` in `context_template`; it is replaced with the row's `Context` value. Use `{short_description_max_words}` in prompt text when referring to the configured short-description length.
+Use `{context}` in `context_template`; it is replaced with the row's `Context` value. Use `{short_description_max_words}` in prompt text when referring to the configured short-description length. The retry prompts take `{problems}` plus `{previous_response}` for `format_retry_prompt`, or `{short_description}` and `{long_description}` for `short_retry_prompt`.
 
 The bundled instructions prompt asks the model to return two labeled fields:
 
@@ -299,6 +309,10 @@ LONG: <long description>
 
 GID strips these labels when saving to the TSV. Long descriptions are saved as one plain-text paragraph. If the model returns a malformed response, GID rejects that result instead of inventing a filename from the long description.
 
+The short description is never truncated. If the model returns more than `short_description_max_words` words, or a phrase that ends mid-thought (for example on "with", a possessive, or an unclosed quotation mark), GID sends a small text-only follow-up asking the model to rewrite it, up to two times, and reports an error for that image if it still cannot get a valid one. If a response does not use the SHORT/LONG layout at all, GID resends the images once together with the rejected response and the reason.
+
+The bundled default prompt requires every piece of visible text in an image to be transcribed word for word in the long description, including labels, credit lines, and fine print. Text is never summarized.
+
 ## Output Format
 
 ### TSV
@@ -306,7 +320,7 @@ GID strips these labels when saving to the TSV. Long descriptions are saved as o
 Folder mode writes a tab-separated file with these columns:
 
 1. `OriginalFilename`: Original image filename.
-2. `ShortDescription`: Short description suitable for filenames, trimmed to `short_description_max_words`.
+2. `ShortDescription`: Short description suitable for filenames, at most `short_description_max_words` words as written by the model, never truncated.
 3. `LongDescription`: Detailed description of the image content.
 4. `Context`: Optional per-image facts supplied by a user.
 5. `Composite`: `yes` or `no`; `yes` means the row represents a composite image set.
@@ -314,7 +328,7 @@ Folder mode writes a tab-separated file with these columns:
 
 The TSV is plain UTF-8 with one physical row per image. Long descriptions are collapsed to one plain-text paragraph. Newlines inside context are stored as literal `\n` sequences so spreadsheet apps keep rows and columns stable. Common smart punctuation is normalized to ASCII punctuation.
 
-If `ShortDescription` or `LongDescription` is empty or appears malformed, including generic long-description openings such as "The image shows", GID will regenerate that row.
+If `ShortDescription` or `LongDescription` is empty or appears malformed, including generic long-description openings such as "The image shows" or a short description that is over the word limit or ends mid-phrase, GID will regenerate that row.
 
 ### Excel
 
@@ -357,8 +371,8 @@ options:
                         (0=auto, default=0).
   -v, --verbose         Enable verbose output including HTTP requests.
   -c, --config CONFIG   Path to the configuration file (default: config.json
-                        in the target folder, current directory, or
-                        ~/.config/gid/config.json)
+                        in the folder being described, then next to gid.py,
+                        then ~/.config/gid/config.json)
   --init-tsv            Generate TSV with hashes and empty
                         descriptions/context (folder mode only; use
                         --composites to include composite rows).
@@ -376,7 +390,7 @@ options:
   --write-sample-config [PATH]
                         Write built-in defaults to a sample config file and
                         exit (default: config.json.sample).
-  -m, --model MODEL     OpenAI model ID to send to the API (default: gpt-5.5).
+  -m, --model MODEL     OpenAI model ID to send to the API (default: gpt-5.6).
   -p, --prompt NAME     System prompt file name from a prompts/ directory (for
                         example: web for prompts/web.md).
   --reasoning-effort {none,low,medium,high,xhigh}
