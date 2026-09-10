@@ -6,10 +6,10 @@ Single image mode:
   Outputs short and long descriptions directly to standard output.
 
 Folder mode:
-  Processes images in a specified folder, storing metadata in a TSV, and optionally
-  copying them into a 'Described' subfolder.
+  Processes images in a specified folder, storing results in an Excel workbook, and
+  optionally copying them into a 'Described' subfolder.
 
-  We output six columns in the TSV:
+  The workbook has six columns:
     1) OriginalFilename
     2) ShortDescription
     3) LongDescription
@@ -19,6 +19,7 @@ Folder mode:
 
 Features:
   - SHA-1-based checks for previously processed images
+  - Reviewers edit the workbook in Excel; edited rows are kept, unusable ones are regenerated
   - Optional no-copy behavior via --no-copy
   - Control temperature and max tokens via CLI flags
   - Preserves alphabetical order of files as typically seen in Explorer/Finder
@@ -89,7 +90,7 @@ class ResponseIncompleteError(ValueError):
     """Raised when the model stopped before finishing its response."""
 
 
-# Smart punctuation is normalized to ASCII in TSV text and in generated filenames.
+# Smart punctuation is normalized to ASCII in workbook text and in generated filenames.
 SMART_PUNCTUATION_TRANSLATION = str.maketrans({
     "\u2018": "'",
     "\u2019": "'",
@@ -145,7 +146,7 @@ class Config:
         },
         "output": {
             "output_folder_name": "Described",
-            "tsv_filename": "descriptions.tsv"
+            "workbook_filename": "descriptions.xlsx"
         },
         "prompt": {
             "system_prompt": "default",
@@ -482,8 +483,8 @@ class ImageResult:
 
 
 @dataclass
-class TSVEntry:
-    """Data class to store TSV row data."""
+class DescriptionRow:
+    """One row of the descriptions workbook."""
     original_filename: str
     short_desc: str
     long_desc: str
@@ -495,7 +496,7 @@ class TSVEntry:
 @dataclass
 class CompositeResult:
     """Data class to store composite image processing results."""
-    entry: TSVEntry
+    entry: DescriptionRow
     composite_hash: str
     short_desc: str
     long_desc: str
@@ -528,7 +529,7 @@ class FileHelper:
         """
         Replace invalid Windows filename characters (\\/:*?"<>|) with spaces,
         and remove trailing periods/spaces. Smart punctuation is normalized first
-        so filenames match the TSV text exactly.
+        so filenames match the workbook text exactly.
         """
         name = name.translate(SMART_PUNCTUATION_TRANSLATION)
         name = re.sub(r'[\\/:*?"<>|]+', " ", name)
@@ -539,7 +540,7 @@ class FileHelper:
     @staticmethod
     def described_folder_path(folder_path: str, output_folder_name: str, no_copy: bool = False) -> str:
         """
-        Return the folder where TSV output and copied files belong.
+        Return the folder where the workbook and copied files belong.
 
         Args:
             folder_path: Source folder path
@@ -547,7 +548,7 @@ class FileHelper:
             no_copy: If True, return source folder directly
 
         Returns:
-            Path where TSV and copied files should be placed
+            Path where the workbook and copied files should be placed
         """
         if no_copy:
             return folder_path
@@ -559,63 +560,134 @@ class FileHelper:
         os.makedirs(folder_path, exist_ok=True)
 
 
-class TSVHandler:
-    """Class to handle TSV file operations."""
+class DescriptionStore:
+    """
+    The description rows for one folder, stored in an Excel workbook.
 
-    def __init__(self, tsv_path: str):
-        self.tsv_path = tsv_path
-        self.entries: List[TSVEntry] = []
-        self.entries_by_hash: Dict[str, TSVEntry] = {}
-        self.has_context_column = False
-        self.has_composite_column = False
+    The workbook is the file GID reads and writes, so reviewers can edit it in
+    Excel on any platform without an encoding round trip. A legacy
+    descriptions.tsv next to it is imported once when no workbook exists yet.
+    """
+
+    COLUMNS = ("OriginalFilename", "ShortDescription", "LongDescription", "Context", "Composite", "SHA1")
+    COLUMN_WIDTHS = (40, 45, 100, 45, 10, 42)
+    SHEET_TITLE = "descriptions"
+    TRUE_VALUES = {"yes", "y", "true", "1"}
+
+    def __init__(self, workbook_path: str):
+        self.workbook_path = workbook_path
+        self.legacy_tsv_path = str(Path(workbook_path).with_suffix(".tsv"))
+        self.entries: List[DescriptionRow] = []
+        self.entries_by_hash: Dict[str, DescriptionRow] = {}
         self.load()
-    
+
     @staticmethod
-    def _escape_newlines(text: str) -> str:
-        """Escape actual newlines as \\n for single-line TSV rows."""
-        text = text.translate(SMART_PUNCTUATION_TRANSLATION)
-        return text.replace('\n', '\\n').replace('\r', '\\r')
+    def _require_openpyxl() -> Any:
+        try:
+            import openpyxl
+        except ImportError as e:
+            raise ImportError(
+                "The openpyxl package is required for the descriptions workbook. "
+                "Install it with: pip install openpyxl"
+            ) from e
+        return openpyxl
+
+    @staticmethod
+    def _cell_text(value: Any) -> str:
+        """Return a cell value as text; empty cells become empty strings."""
+        return "" if value is None else str(value)
+
+    @staticmethod
+    def _one_paragraph(text: str) -> str:
+        """Collapse whitespace so descriptions stay one paragraph even after Excel edits."""
+        return re.sub(r"\s+", " ", text).strip()
 
     @staticmethod
     def _unescape_newlines(text: str) -> str:
-        """Unescape \\n back to actual newlines when reading."""
+        """Unescape the literal \\n sequences legacy TSV files used inside cells."""
         return text.replace('\\n', '\n').replace('\\r', '\r')
 
     def load(self) -> None:
-        """
-        Load existing lines from the TSV (skipping header).
-        """
-        if not os.path.exists(self.tsv_path):
+        """Load rows from the workbook, or import a legacy TSV when no workbook exists."""
+        if os.path.exists(self.workbook_path):
+            rows = self._read_workbook_rows()
+        elif os.path.exists(self.legacy_tsv_path):
+            logger.info(
+                f"Importing legacy {self.legacy_tsv_path}; future runs use "
+                f"{os.path.basename(self.workbook_path)}."
+            )
+            rows = self._read_tsv_rows()
+        else:
             return
+        for orig_filename, short_desc, long_desc, context, composite_raw, file_hash in rows:
+            entry = DescriptionRow(
+                original_filename=orig_filename.strip(),
+                short_desc=self._one_paragraph(short_desc),
+                long_desc=self._one_paragraph(long_desc),
+                context=context.strip(),
+                composite=composite_raw.strip().lower() in self.TRUE_VALUES,
+                file_hash=file_hash.strip()
+            )
+            self.entries.append(entry)
+            if entry.file_hash and entry.file_hash not in self.entries_by_hash:
+                self.entries_by_hash[entry.file_hash] = entry
 
+    def _read_workbook_rows(self) -> List[Tuple[str, ...]]:
+        """Read raw cell text from the workbook, matching columns by header name."""
+        openpyxl = self._require_openpyxl()
+        workbook = openpyxl.load_workbook(self.workbook_path, read_only=True, data_only=True)
         try:
-            self._load_rows()
+            if self.SHEET_TITLE in workbook.sheetnames:
+                worksheet = workbook[self.SHEET_TITLE]
+            else:
+                worksheet = workbook.active
+            row_iter = worksheet.iter_rows(values_only=True)
+            header = [self._cell_text(value).strip() for value in next(row_iter, ())]
+            if not any(header):
+                return []
+            col_index = {name: idx for idx, name in enumerate(header)}
+            missing = [name for name in self.COLUMNS if name not in col_index]
+            if missing:
+                raise ValueError(
+                    f"{self.workbook_path} is missing column(s): {', '.join(missing)}. "
+                    f"Expected header: {', '.join(self.COLUMNS)}."
+                )
+            rows = []
+            for values in row_iter:
+                cells = [self._cell_text(value) for value in values]
+                if not any(cell.strip() for cell in cells):
+                    continue
+                rows.append(tuple(
+                    cells[col_index[name]] if col_index[name] < len(cells) else ""
+                    for name in self.COLUMNS
+                ))
+            return rows
+        finally:
+            workbook.close()
+
+    def _read_tsv_rows(self) -> List[Tuple[str, ...]]:
+        """Read a legacy TSV, failing clearly if another program re-saved it in a non-UTF-8 encoding."""
+        try:
+            return self._parse_tsv()
         except UnicodeDecodeError as e:
             bad_byte = e.object[e.start] if e.start < len(e.object) else None
             byte_text = f" (byte 0x{bad_byte:02x})" if bad_byte is not None else ""
             raise ValueError(
-                f"{self.tsv_path} is not valid UTF-8{byte_text}. It was probably re-saved by another "
+                f"{self.legacy_tsv_path} is not valid UTF-8{byte_text}. It was probably re-saved by another "
                 "program in a different encoding. Re-save it as UTF-8, or delete it to regenerate the "
                 "descriptions."
             ) from e
 
-    def _load_rows(self) -> None:
-        """Read the TSV rows into memory; raises UnicodeDecodeError on non-UTF-8 files."""
-        with open(self.tsv_path, "r", encoding="utf-8-sig", newline="") as tsv_file:
+    def _parse_tsv(self) -> List[Tuple[str, ...]]:
+        rows: List[Tuple[str, ...]] = []
+        with open(self.legacy_tsv_path, "r", encoding="utf-8-sig", newline="") as tsv_file:
             reader = csv.reader(tsv_file, delimiter="\t")
             try:
                 first_row = next(reader)
             except StopIteration:
-                return
+                return rows
 
-            expected_columns = {
-                "OriginalFilename",
-                "ShortDescription",
-                "LongDescription",
-                "Context",
-                "Composite",
-                "SHA1"
-            }
+            expected_columns = set(self.COLUMNS)
             if any(col in expected_columns for col in first_row):
                 header_cols = first_row
                 data_rows = reader
@@ -624,9 +696,6 @@ class TSVHandler:
                 data_rows = [first_row] + list(reader)
 
             col_index = {col: idx for idx, col in enumerate(header_cols)}
-            if header_cols:
-                self.has_context_column = "Context" in col_index
-                self.has_composite_column = "Composite" in col_index
             for parts in data_rows:
                 if not parts or not any(part.strip() for part in parts):
                     continue
@@ -656,28 +725,38 @@ class TSVHandler:
                     composite_raw = col("Composite", "")
                     hash_value = col("SHA1", parts[-1] if parts else "")
 
-                composite = composite_raw.strip().lower() == "yes"
-                entry = TSVEntry(
-                    original_filename=orig_filename,
-                    short_desc=self._unescape_newlines(short_desc),
-                    long_desc=self._unescape_newlines(long_desc),
-                    context=self._unescape_newlines(context),
-                    composite=composite,
-                    file_hash=hash_value
-                )
-                self.entries.append(entry)
-                if hash_value and hash_value not in self.entries_by_hash:
-                    self.entries_by_hash[hash_value] = entry
+                rows.append((
+                    orig_filename,
+                    self._unescape_newlines(short_desc),
+                    self._unescape_newlines(long_desc),
+                    self._unescape_newlines(context),
+                    composite_raw,
+                    hash_value
+                ))
+        return rows
 
-    def get_entry(self, file_hash: str) -> Optional[TSVEntry]:
+    def ensure_writable(self) -> None:
+        """Fail before any API work if the workbook is locked, typically because it is open in Excel."""
+        if not os.path.exists(self.workbook_path):
+            return
+        try:
+            with open(self.workbook_path, "r+b"):
+                pass
+        except PermissionError as e:
+            raise ValueError(
+                f"{self.workbook_path} is locked, probably because it is open in Excel. "
+                "Close it and run again."
+            ) from e
+
+    def get_entry(self, file_hash: str) -> Optional[DescriptionRow]:
         """Get an entry by hash if it exists."""
         return self.entries_by_hash.get(file_hash)
 
-    def get_composite_entries(self) -> List[TSVEntry]:
+    def get_composite_entries(self) -> List[DescriptionRow]:
         """Return all composite entries."""
         return [entry for entry in self.entries if entry.composite]
 
-    def update_entry_hash(self, entry: TSVEntry, new_hash: str) -> None:
+    def update_entry_hash(self, entry: DescriptionRow, new_hash: str) -> None:
         """Update the hash for an entry and maintain the lookup map."""
         old_hash = entry.file_hash
         if old_hash and self.entries_by_hash.get(old_hash) is entry:
@@ -698,7 +777,7 @@ class TSVHandler:
         """Insert or update an entry keyed by file hash."""
         entry = self.entries_by_hash.get(file_hash)
         if entry is None:
-            entry = TSVEntry(
+            entry = DescriptionRow(
                 original_filename=orig_filename,
                 short_desc=short_desc,
                 long_desc=long_desc,
@@ -724,81 +803,59 @@ class TSVHandler:
             self.entries_by_hash[file_hash] = entry
 
     def write_all(self) -> None:
-        """Rewrite the TSV with the current entries."""
-        folder = os.path.dirname(self.tsv_path) or "."
+        """Rewrite the workbook atomically with the current entries."""
+        openpyxl = self._require_openpyxl()
+        from openpyxl.styles import Alignment, Font
+        from openpyxl.utils import get_column_letter
+
+        folder = os.path.dirname(self.workbook_path) or "."
         FileHelper.ensure_folder(folder)
-        fd, temp_path = tempfile.mkstemp(
-            prefix=f".{os.path.basename(self.tsv_path)}.",
-            suffix=".tmp",
-            dir=folder,
-            text=True
-        )
-        try:
-            # utf-8-sig writes a byte-order mark so Excel and other spreadsheet apps
-            # detect UTF-8 when the file is opened directly instead of assuming ANSI.
-            with os.fdopen(fd, "w", encoding="utf-8-sig", newline="") as tsv_file:
-                writer = csv.writer(tsv_file, delimiter="\t", lineterminator="\n")
-                writer.writerow([
-                    "OriginalFilename",
-                    "ShortDescription",
-                    "LongDescription",
-                    "Context",
-                    "Composite",
-                    "SHA1"
-                ])
-                for entry in self.entries:
-                    escaped_short = self._escape_newlines(entry.short_desc)
-                    escaped_long = self._escape_newlines(entry.long_desc)
-                    escaped_context = self._escape_newlines(entry.context)
-                    composite_value = "yes" if entry.composite else "no"
-                    writer.writerow([
-                        entry.original_filename,
-                        escaped_short,
-                        escaped_long,
-                        escaped_context,
-                        composite_value,
-                        entry.file_hash
-                    ])
-            os.replace(temp_path, self.tsv_path)
-        except Exception:
-            try:
-                os.unlink(temp_path)
-            except OSError:
-                pass
-            raise
 
-    def write_excel(self, xlsx_path: str) -> bool:
-        """Write the current entries to an Excel .xlsx file."""
-        try:
-            from openpyxl import Workbook
-        except ImportError:
-            logger.error("openpyxl is required for --make-excel. Install with: pip install openpyxl")
-            return False
-
-        workbook = Workbook()
+        workbook = openpyxl.Workbook()
         worksheet = workbook.active
-        worksheet.title = "descriptions"
-        worksheet.append([
-            "OriginalFilename",
-            "ShortDescription",
-            "LongDescription",
-            "Context",
-            "Composite",
-            "SHA1"
-        ])
+        worksheet.title = self.SHEET_TITLE
+        worksheet.append(list(self.COLUMNS))
+        for cell in worksheet[1]:
+            cell.font = Font(bold=True)
         for entry in self.entries:
-            composite_value = "yes" if entry.composite else "no"
             worksheet.append([
                 entry.original_filename,
-                entry.short_desc,
-                entry.long_desc,
-                entry.context,
-                composite_value,
+                entry.short_desc.translate(SMART_PUNCTUATION_TRANSLATION),
+                entry.long_desc.translate(SMART_PUNCTUATION_TRANSLATION),
+                entry.context.translate(SMART_PUNCTUATION_TRANSLATION),
+                "yes" if entry.composite else "no",
                 entry.file_hash
             ])
+        for row in worksheet.iter_rows(min_row=2):
+            for cell in row:
+                # Keep every value literal text so a description starting with "=" is never a formula.
+                cell.data_type = "s"
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
+        for idx, width in enumerate(self.COLUMN_WIDTHS, start=1):
+            worksheet.column_dimensions[get_column_letter(idx)].width = width
+        worksheet.freeze_panes = "A2"
 
-        workbook.save(xlsx_path)
-        return True
+        fd, temp_path = tempfile.mkstemp(
+            prefix=f".{os.path.basename(self.workbook_path)}.",
+            suffix=".tmp",
+            dir=folder
+        )
+        os.close(fd)
+        try:
+            workbook.save(temp_path)
+            os.replace(temp_path, self.workbook_path)
+        except PermissionError as e:
+            raise ValueError(
+                f"Cannot write {self.workbook_path}: {e}. If it is open in Excel, close it and run again."
+            ) from e
+        except Exception:
+            raise
+        finally:
+            if os.path.exists(temp_path):
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
 
 
 class ImageDescriber:
@@ -1354,7 +1411,7 @@ class ImageProcessor:
         self.max_workers = Config.normalize_max_workers(config["processing"]["max_workers"])
         self.verbose = config["processing"]["verbose"]
         self.output_folder_name = config["output"]["output_folder_name"]
-        self.tsv_filename = config["output"]["tsv_filename"]
+        self.workbook_filename = config["output"]["workbook_filename"]
         if not init_only:
             # Resolve prompt file references (for example "default" -> prompts/default.md)
             # before reading the prompt fields, otherwise the bare names get sent to the model.
@@ -1370,10 +1427,11 @@ class ImageProcessor:
         self.short_description_max_words = prompt_config.get("short_description_max_words")
         
         self.described_folder_path = FileHelper.described_folder_path(folder_path, self.output_folder_name, self.no_copy)
-        self.tsv_path = os.path.join(self.described_folder_path, self.tsv_filename)
-        self.tsv_handler = TSVHandler(self.tsv_path)
+        self.workbook_path = os.path.join(self.described_folder_path, self.workbook_filename)
+        self.store = DescriptionStore(self.workbook_path)
         self.describer = None
         if not init_only:
+            self.store.ensure_writable()
             self.describer = ImageDescriber(
                 api_key=self.api_key,
                 model=self.model,
@@ -1397,15 +1455,23 @@ class ImageProcessor:
             logging.getLogger("openai").setLevel(logging.INFO)
             logging.getLogger("httpx").setLevel(logging.INFO)
 
-    def entry_needs_description(self, entry: TSVEntry) -> bool:
-        """Return True when a TSV row is missing or has malformed descriptions."""
+    def entry_needs_description(self, entry: DescriptionRow) -> bool:
+        """Return True when a stored row is missing or has unusable descriptions, logging why."""
         if not entry.short_desc or not entry.long_desc:
             return True
-        return ImageDescriber.description_fields_are_malformed(
-            entry.short_desc,
-            entry.long_desc,
-            self.short_description_max_words
-        )
+        problems = [
+            f"short description {problem}"
+            for problem in ImageDescriber.short_description_problems(
+                entry.short_desc,
+                self.short_description_max_words
+            )
+        ] + [
+            f"long description {problem}"
+            for problem in ImageDescriber.long_description_problems(entry.long_desc)
+        ]
+        if problems:
+            logger.info(f"Regenerating {entry.original_filename}: {'; '.join(problems)}.")
+        return bool(problems)
 
     def collect_image_files(
         self,
@@ -1429,7 +1495,7 @@ class ImageProcessor:
                     continue
                 image_path = os.path.join(self.folder_path, filename)
                 file_hash = FileHelper.hash_file(image_path)
-                entry = self.tsv_handler.get_entry(file_hash)
+                entry = self.store.get_entry(file_hash)
                 if entry and not include_existing and not self.entry_needs_description(entry):
                     continue
                 # Skip if queued
@@ -1587,7 +1653,7 @@ class ImageProcessor:
 
     def collect_composite_tasks(
         self
-    ) -> Tuple[List[Tuple[TSVEntry, List[Tuple[int, str, str, str]], str]], Set[str]]:
+    ) -> Tuple[List[Tuple[DescriptionRow, List[Tuple[int, str, str, str]], str]], Set[str]]:
         """Collect composite tasks and the filenames they cover."""
         if self.no_composites:
             return [], set()
@@ -1595,7 +1661,7 @@ class ImageProcessor:
         tasks = []
         skip_filenames: Set[str] = set()
         composite_sets = self._discover_composite_sets()
-        composite_entries = self.tsv_handler.get_composite_entries()
+        composite_entries = self.store.get_composite_entries()
         entry_by_base = {}
         for entry in composite_entries:
             key = self._normalize_base_name(entry.original_filename)
@@ -1609,7 +1675,7 @@ class ImageProcessor:
             entry = entry_by_base.get(base_key)
             preferred_name = self._preferred_composite_name(base_name, files)
             if entry is None:
-                entry = TSVEntry(
+                entry = DescriptionRow(
                     original_filename=preferred_name,
                     short_desc="",
                     long_desc="",
@@ -1617,7 +1683,7 @@ class ImageProcessor:
                     composite=True,
                     file_hash=""
                 )
-                self.tsv_handler.entries.append(entry)
+                self.store.entries.append(entry)
             else:
                 entry.composite = True
                 if self._strip_image_extension(entry.original_filename) == entry.original_filename:
@@ -1641,7 +1707,7 @@ class ImageProcessor:
 
     def process_composite_task(
         self,
-        task: Tuple[TSVEntry, List[Tuple[int, str, str, str]], str]
+        task: Tuple[DescriptionRow, List[Tuple[int, str, str, str]], str]
     ) -> Optional[CompositeResult]:
         """Process a composite image set and return the result."""
         entry, files, composite_hash = task
@@ -1678,9 +1744,9 @@ class ImageProcessor:
             self.handle_composite_result(result)
 
     def _reserve_image_rows(self, tasks: List[Tuple[str, str, str, str]]) -> None:
-        """Reserve TSV rows for image tasks in task order."""
+        """Reserve workbook rows for image tasks in task order."""
         for filename, _image_path, file_hash, context in tasks:
-            self.tsv_handler.upsert_entry(
+            self.store.upsert_entry(
                 orig_filename=filename,
                 short_desc="",
                 long_desc="",
@@ -1712,21 +1778,21 @@ class ImageProcessor:
                 logger.info(f"  - {filename}")
 
     def handle_composite_result(self, result: CompositeResult) -> None:
-        """Update TSV entry for a composite result (no file copying)."""
+        """Update the workbook row for a composite result (no file copying)."""
         short_desc = FileHelper.sanitize_filename(result.short_desc)
         result.entry.short_desc = short_desc
         result.entry.long_desc = result.long_desc
-        self.tsv_handler.update_entry_hash(result.entry, result.composite_hash)
+        self.store.update_entry_hash(result.entry, result.composite_hash)
 
     def handle_image_result(self, result: ImageResult) -> None:
         """
-        Handle the image processing result - copy file and add to TSV.
+        Handle the image processing result - copy file and add to the workbook.
         """
         # Sanitize short_desc for file naming
         short_desc = FileHelper.sanitize_filename(result.short_desc)
 
         if self.no_copy:
-            self.tsv_handler.upsert_entry(
+            self.store.upsert_entry(
                 result.original_filename,
                 short_desc,
                 result.long_desc,
@@ -1769,8 +1835,8 @@ class ImageProcessor:
         # Final short name is the new image's base
         final_short_name = os.path.splitext(new_image_name)[0]
         
-        # Add to TSV
-        self.tsv_handler.upsert_entry(
+        # Add to the workbook
+        self.store.upsert_entry(
             result.original_filename,
             final_short_name,
             result.long_desc,
@@ -1797,7 +1863,7 @@ class ImageProcessor:
         row_label = _label(total_count, "row") if composite_count else _label(total_count, "image")
         
         if total_count == 0:
-            self.tsv_handler.write_all()
+            self.store.write_all()
             logger.info("No new images to process.")
             return
 
@@ -1853,18 +1919,18 @@ class ImageProcessor:
                         kind = future_to_kind[future]
                         self._handle_job_result(kind, result)
         finally:
-            # Rewrite TSV with updated entries, including successful results before any failure.
-            self.tsv_handler.write_all()
+            # Rewrite the workbook with updated entries, including successful results before any failure.
+            self.store.write_all()
         logger.info(f"Processed {done_count} {row_label}.")
 
-    def init_tsv(self, force: bool = False) -> None:
-        """Initialize or refresh a TSV with hashes and empty descriptions/context."""
+    def init_workbook(self, force: bool = False) -> None:
+        """Create or refresh the workbook with hashes and empty descriptions/context."""
         all_files = sorted(os.listdir(self.folder_path), key=str.lower)
         pending_hashes = set()
-        existing_entries = [] if force else list(self.tsv_handler.entries)
-        existing_by_hash: Dict[str, TSVEntry] = {}
-        existing_singles_by_filename: Dict[str, TSVEntry] = {}
-        existing_composites_by_base: Dict[str, TSVEntry] = {}
+        existing_entries = [] if force else list(self.store.entries)
+        existing_by_hash: Dict[str, DescriptionRow] = {}
+        existing_singles_by_filename: Dict[str, DescriptionRow] = {}
+        existing_composites_by_base: Dict[str, DescriptionRow] = {}
         matched_existing_ids: Set[int] = set()
 
         for entry in existing_entries:
@@ -1879,24 +1945,24 @@ class ImageProcessor:
                 if filename_key and filename_key not in existing_singles_by_filename:
                     existing_singles_by_filename[filename_key] = entry
 
-        new_entries: List[TSVEntry] = []
-        new_entries_by_hash: Dict[str, TSVEntry] = {}
+        new_entries: List[DescriptionRow] = []
+        new_entries_by_hash: Dict[str, DescriptionRow] = {}
 
-        def add_entry(entry: TSVEntry) -> None:
+        def add_entry(entry: DescriptionRow) -> None:
             new_entries.append(entry)
             if entry.file_hash and entry.file_hash not in new_entries_by_hash:
                 new_entries_by_hash[entry.file_hash] = entry
 
         def refreshed_entry(
-            existing: Optional[TSVEntry],
+            existing: Optional[DescriptionRow],
             orig_filename: str,
             file_hash: str,
             composite: bool,
             preserve_descriptions: bool
-        ) -> TSVEntry:
+        ) -> DescriptionRow:
             if existing is not None:
                 matched_existing_ids.add(id(existing))
-            return TSVEntry(
+            return DescriptionRow(
                 original_filename=orig_filename,
                 short_desc=existing.short_desc if existing and preserve_descriptions else "",
                 long_desc=existing.long_desc if existing and preserve_descriptions else "",
@@ -1967,22 +2033,12 @@ class ImageProcessor:
                 preserved_count += 1
                 add_entry(entry)
 
-        self.tsv_handler.entries = new_entries
-        self.tsv_handler.entries_by_hash = new_entries_by_hash
-        self.tsv_handler.write_all()
-        logger.info(f"Initialized TSV for {total_count} rows.")
+        self.store.entries = new_entries
+        self.store.entries_by_hash = new_entries_by_hash
+        self.store.write_all()
+        logger.info(f"Initialized workbook for {total_count} rows.")
         if preserved_count:
             logger.info(f"Preserved {preserved_count} existing unmatched rows.")
-
-    def make_excel(self) -> None:
-        """Generate an Excel file from the current TSV entries."""
-        if not os.path.exists(self.tsv_path):
-            logger.error(f"No TSV found at {self.tsv_path}")
-            return
-        xlsx_path = str(Path(self.tsv_path).with_suffix(".xlsx"))
-        if self.tsv_handler.write_excel(xlsx_path):
-            logger.info(f"Wrote Excel file to {xlsx_path}")
-
 
 class CLI:
     """Command-line interface handler."""
@@ -1991,7 +2047,7 @@ class CLI:
     def parse_args() -> argparse.Namespace:
         """Parse command-line arguments."""
         parser = argparse.ArgumentParser(
-            description="Describe images with OpenAI. For folders, writes 6 columns in TSV:\n"
+            description="Describe images with OpenAI. For folders, writes a descriptions.xlsx workbook with columns:\n"
                         "OriginalFilename, ShortDescription, LongDescription, Context, Composite, SHA1.\n"
                         "For single image files, outputs descriptions directly."
         )
@@ -2047,19 +2103,16 @@ class CLI:
             help="Path to the configuration file (default: config.json in the folder being described, then next to gid.py, then ~/.config/gid/config.json)"
         )
         parser.add_argument(
-            "--init-tsv",
+            "--init", "--init-tsv",
+            dest="init",
             action="store_true",
-            help="Generate TSV with hashes and empty descriptions/context (folder mode only; use --composites to include composite rows)."
+            help="Create the workbook with hashes and empty descriptions/context, without calling the API (folder mode only; use --composites to include composite rows)."
         )
         parser.add_argument(
-            "--force-init-tsv",
+            "--force-init", "--force-init-tsv",
+            dest="force_init",
             action="store_true",
-            help="Reset the TSV when using --init-tsv instead of preserving existing rows/context."
-        )
-        parser.add_argument(
-            "--make-excel",
-            action="store_true",
-            help="Generate an Excel .xlsx file from the existing TSV (folder mode only)."
+            help="Reset the workbook when using --init instead of preserving existing rows/context."
         )
         composite_group = parser.add_mutually_exclusive_group()
         composite_group.add_argument(
@@ -2116,11 +2169,9 @@ class CLI:
             sys.exit(1)
         
         args = parser.parse_args()
-        if args.force_init_tsv and not args.init_tsv:
-            parser.error("--force-init-tsv requires --init-tsv")
-        if args.write_sample_config and (
-            args.init_tsv or args.make_excel or args.show_composites
-        ):
+        if args.force_init and not args.init:
+            parser.error("--force-init requires --init")
+        if args.write_sample_config and (args.init or args.show_composites):
             parser.error("--write-sample-config cannot be combined with folder no-API actions")
         if args.length is not None and args.length < 1:
             parser.error("--length must be at least 1")
@@ -2235,7 +2286,7 @@ class CLI:
     @staticmethod
     def is_no_api_mode(args: argparse.Namespace) -> bool:
         """Return True for modes that do not call the OpenAI API."""
-        return args.init_tsv or args.show_composites or args.make_excel
+        return args.init or args.show_composites
 
     @staticmethod
     def ensure_api_key(args: argparse.Namespace, config: Dict[str, Any]) -> None:
@@ -2252,7 +2303,7 @@ class CLI:
     @staticmethod
     def process_folder(folder_path: str, args: argparse.Namespace, config: Dict[str, Any]) -> None:
         """Run the requested folder-mode action for one folder."""
-        if args.show_composites or args.init_tsv or args.make_excel:
+        if args.show_composites or args.init:
             processor = ImageProcessor(
                 folder_path=folder_path,
                 config=config,
@@ -2260,10 +2311,8 @@ class CLI:
             )
             if args.show_composites:
                 processor.show_composites()
-            if args.init_tsv:
-                processor.init_tsv(force=args.force_init_tsv)
-            if args.make_excel:
-                processor.make_excel()
+            if args.init:
+                processor.init_workbook(force=args.force_init)
             return
 
         processor = ImageProcessor(
@@ -2304,18 +2353,6 @@ class CLI:
             return False
 
     @staticmethod
-    def _recurse_make_excel_candidate(folder_path: str) -> bool:
-        """Return True if a folder appears to contain a default TSV for Excel export."""
-        return (
-            os.path.exists(os.path.join(folder_path, Config.DEFAULT_CONFIG["output"]["tsv_filename"]))
-            or os.path.exists(os.path.join(
-                folder_path,
-                Config.DEFAULT_CONFIG["output"]["output_folder_name"],
-                Config.DEFAULT_CONFIG["output"]["tsv_filename"]
-            ))
-        )
-
-    @staticmethod
     def discover_recurse_folders(args: argparse.Namespace) -> List[str]:
         """Discover recursive target folders in deterministic order."""
         root, match_name = CLI._recurse_root_and_match(args.path)
@@ -2334,7 +2371,7 @@ class CLI:
             current_name = os.path.basename(current)
             if match_name_lower and current_name.lower() != match_name_lower:
                 continue
-            if CLI._has_direct_images(current) or (args.make_excel and CLI._recurse_make_excel_candidate(current)):
+            if CLI._has_direct_images(current):
                 folders.append(current)
 
         return folders
@@ -2388,14 +2425,11 @@ class CLI:
             if os.path.isdir(args.path):
                 CLI.process_folder(args.path, args, config)
             elif os.path.isfile(args.path) and args.path.lower().endswith(VALID_EXTENSIONS):
-                if args.init_tsv:
-                    print("Error: --init-tsv is only supported for folder mode.", file=sys.stderr)
+                if args.init:
+                    print("Error: --init is only supported for folder mode.", file=sys.stderr)
                     sys.exit(1)
                 if args.show_composites:
                     print("Error: --show-composites is only supported for folder mode.", file=sys.stderr)
-                    sys.exit(1)
-                if args.make_excel:
-                    print("Error: --make-excel is only supported for folder mode.", file=sys.stderr)
                     sys.exit(1)
                 # Process single image
                 CLI.process_single_image(

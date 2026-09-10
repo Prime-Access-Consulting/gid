@@ -1,17 +1,17 @@
 # GID - Generate Image Descriptions (Agent Notes)
 
 ## Purpose
-Generate short and long textual descriptions for images using the OpenAI API. The tool can process a single image (stdout only) or a folder (TSV output plus optional copies).
+Generate short and long textual descriptions for images using the OpenAI API. The tool can process a single image (stdout only) or a folder (an Excel workbook plus optional copies).
 
 ## Repository Layout
 - `gid.py`: single entry point, all logic lives here
 - `config.json.sample`: sample config (copy to `config.json` to override defaults)
-- `requirements.txt`: depends on `openai>=1.0.0`
+- `requirements.txt`: depends on `openai>=1.0.0` and `openpyxl>=3.1.2` (the workbook store)
 - `README.md`: user-facing docs
 
 ## Run Commands
 ```bash
-# Process a folder of images (creates TSV and optional copies)
+# Process a folder of images (creates the descriptions workbook and optional copies)
 python3 gid.py /path/to/images
 
 # Process a single image (outputs descriptions to console only)
@@ -58,9 +58,8 @@ python3 gid.py /path/to/images --verbose
 - `--no-reasoning`: omit the API `reasoning` parameter for models that do not support it
 - `-t`, `--temperature`: sampling temperature
 - `-l`, `--length`: max tokens (mapped to `max_output_tokens`, which includes reasoning tokens); a response cut off at this limit is retried once with double the budget, then reported as an error
-- `--init-tsv`: generate TSV with hashes and empty descriptions/context (folder mode only, no API calls)
-- `--force-init-tsv`: reset the TSV during `--init-tsv` instead of preserving existing rows/context
-- `--make-excel`: generate an Excel .xlsx from the existing TSV (folder mode only, no API calls)
+- `--init` (alias `--init-tsv`): create the workbook with hashes and empty descriptions/context (folder mode only, no API calls)
+- `--force-init` (alias `--force-init-tsv`): reset the workbook during `--init` instead of preserving existing rows/context
 - `--composites`: enable automatic composite detection (off by default)
 - `--no-composites`: disable automatic composite detection (default; useful to override config)
 - `--show-composites`: list detected composite sets and their matching files (folder mode only, no API calls or output writes)
@@ -83,16 +82,16 @@ Prompt fields can be inline prompt text or prompt file references. Bare path-lik
 ## Modes and Output
 - **Folder mode** (path is a directory):
   - Collects images with extensions: `.png .jpg .jpeg .gif .bmp .tiff .webp`
-  - Sorts filenames case-insensitively and preserves that order for new single-image TSV rows, while API calls still run in parallel.
-  - Writes `descriptions.tsv` (header only if file does not exist):
+  - Sorts filenames case-insensitively and preserves that order for new single-image workbook rows, while API calls still run in parallel.
+  - Writes `descriptions.xlsx` (`DescriptionStore`; sheet `descriptions`, bold frozen header, wrapped text) with columns:
     - `OriginalFilename`, `ShortDescription`, `LongDescription`, `Context`, `Composite`, `SHA1`
-  - TSV files are UTF-8 with a byte-order mark (written with `utf-8-sig`, read with `utf-8-sig`) so spreadsheet apps detect the encoding; one physical row per image. A TSV that is not valid UTF-8 (typically re-saved by another program) is a fatal error with guidance, never decoded with a guessed encoding.
-  - Long descriptions are collapsed to one plain-text paragraph.
-  - Newlines inside context are stored as literal `\n` sequences so spreadsheet apps keep rows and columns stable.
-  - Common smart punctuation is normalized to ASCII punctuation in TSV text fields.
-  - Uses SHA-1 hashes to skip files already present in the TSV and to skip duplicates within the same run.
-  - If `ShortDescription` or `LongDescription` is empty or appears malformed for a hash, including generic long-description openings such as "The image shows" or a short description that is over the word limit or ends mid-phrase (dangling word, possessive, or unbalanced quotes), it will be reprocessed to fill in descriptions.
-  - `--init-tsv` preserves existing matching rows by default; if content changes under the same filename/base, it preserves context but clears descriptions. `--force-init-tsv` resets rows.
+  - The workbook is the source of truth. Reviewers edit it in Excel (Windows or Mac) and save as xlsx; GID reads it back on the next run. Every cell is written as text, so a value starting with `=` is never a formula. On Windows, GID refuses to start API work while Excel holds the workbook locked.
+  - A legacy `descriptions.tsv` (same stem as the workbook) is imported once when no workbook exists, then ignored. A legacy TSV that is not valid UTF-8 (typically re-saved by another program) is a fatal error with guidance, never decoded with a guessed encoding.
+  - Short and long descriptions are collapsed to one line on load, so line breaks typed in Excel do not trigger regeneration. Newlines inside context are preserved.
+  - Common smart punctuation is normalized to ASCII punctuation in workbook text fields.
+  - Uses SHA-1 hashes to skip files already present in the workbook and to skip duplicates within the same run.
+  - If `ShortDescription` or `LongDescription` is empty or appears malformed for a hash, including generic long-description openings such as "The image shows" or a short description that is over the word limit or ends mid-phrase (dangling word, possessive, or unbalanced quotes), it will be reprocessed to fill in descriptions, and the reason is logged as `Regenerating <file>: ...`.
+  - `--init` preserves existing matching rows by default; if content changes under the same filename/base, it preserves context but clears descriptions. `--force-init` resets rows.
   - Copies images into `Described/` by default; `--no-copy` keeps everything in the source folder.
   - Short description is sanitized for filename safety; collisions are resolved with `" 2"`, `" 3"`, ... up to 100.
   - Composite detection is disabled by default (enable with `--composites`):

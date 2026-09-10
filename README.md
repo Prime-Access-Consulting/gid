@@ -1,17 +1,17 @@
 # GID - Generate Image Descriptions
 
-GID is a Python CLI for generating short, filename-friendly image descriptions and longer human-readable descriptions with an OpenAI model. It can process one image, one folder, or many folders recursively, and stores folder results in a resumable TSV workflow with optional Excel export.
+GID is a Python CLI for generating short, filename-friendly image descriptions and longer human-readable descriptions with an OpenAI model. It can process one image, one folder, or many folders recursively, and stores folder results in a resumable Excel workbook that reviewers can edit directly.
 
 ## What It Does
 
 - Generates both short and long descriptions for image files.
-- Processes a single image to stdout, a folder to TSV, or matching folders recursively.
-- Writes `descriptions.tsv` with original filename, descriptions, optional context, composite status, and SHA-1 hash.
+- Processes a single image to stdout, a folder to a workbook, or matching folders recursively.
+- Writes a `descriptions.xlsx` workbook with original filename, descriptions, optional context, composite status, and SHA-1 hash.
 - Preserves work between runs by using SHA-1 hashes and regenerating only missing or malformed descriptions.
-- Supports a context-first workflow with `--init-tsv`, so users can add per-image facts before generation.
+- Reads reviewer edits back from the workbook on the next run, so descriptions can be corrected in Excel on Windows or Mac without any encoding round trip.
+- Supports a context-first workflow with `--init`, so users can add per-image facts before generation.
 - Optionally copies described images into a `Described/` folder using sanitized short descriptions as filenames.
 - Can skip copying with `--no-copy` and keep all output in the source folder.
-- Can export an existing TSV to `descriptions.xlsx` with `--make-excel`.
 - Transcribes every piece of visible text word for word in the long description, and never truncates short descriptions: an over-long or mid-phrase short description is sent back to the model for a rewrite.
 - Supports prompt files, custom config files, model overrides, reasoning controls, and temperature/max-token settings.
 - Supports optional composite detection for filename sequences such as `base_1.jpg`, `base_2.jpg`, `base_3.jpg`.
@@ -67,7 +67,7 @@ Process a folder of images:
 python3 gid.py /path/to/images
 ```
 
-By default, folder mode creates `Described/descriptions.tsv` and copies processed images into `Described/` with filenames based on their short descriptions.
+By default, folder mode creates `Described/descriptions.xlsx` and copies processed images into `Described/` with filenames based on their short descriptions.
 
 Process a folder without copying images:
 
@@ -75,7 +75,7 @@ Process a folder without copying images:
 python3 gid.py /path/to/images --no-copy
 ```
 
-With `--no-copy`, GID writes `descriptions.tsv` directly in the source folder.
+With `--no-copy`, GID writes `descriptions.xlsx` directly in the source folder.
 
 Process one image:
 
@@ -101,10 +101,10 @@ python3 gid.py --recurse final
 
 ### Add Context Before Describing
 
-Create a TSV with image hashes and empty description/context fields:
+Create the workbook with image hashes and empty description/context fields:
 
 ```bash
-python3 gid.py /path/to/images --init-tsv
+python3 gid.py /path/to/images --init
 ```
 
 Fill in the `Context` column with per-image facts, then run GID normally:
@@ -113,17 +113,17 @@ Fill in the `Context` column with per-image facts, then run GID normally:
 python3 gid.py /path/to/images
 ```
 
-`--init-tsv` does not call the API. By default, rerunning it preserves existing rows, context, and descriptions when hashes still match. If a file changes under the same filename or composite base, GID preserves context and clears descriptions so the row can be regenerated. Use `--force-init-tsv` to reset the TSV.
+`--init` does not call the API. By default, rerunning it preserves existing rows, context, and descriptions when hashes still match. If a file changes under the same filename or composite base, GID preserves context and clears descriptions so the row can be regenerated. Use `--force-init` to reset the workbook.
 
-### Export Excel
+### Review and Edit Descriptions
 
-Generate an Excel file from an existing TSV:
+Open `Described/descriptions.xlsx` in Excel on Windows or Mac, edit the `ShortDescription`, `LongDescription`, or `Context` cells, save it as an Excel workbook, and close it. The next GID run reads the edited rows back:
 
-```bash
-python3 gid.py /path/to/images --make-excel
-```
+- Edited rows are kept as long as the short description still fits the filename rules (at most `short_description_max_words` words, a complete phrase, no forbidden characters) and the long description is present.
+- Rows that fail those checks are regenerated, and GID logs the reason as `Regenerating <file>: ...`.
+- Line breaks typed inside a description cell are collapsed to one paragraph. Line breaks inside `Context` are preserved.
 
-This does not call the API. It writes `descriptions.xlsx` next to the TSV.
+Do not save the workbook as CSV or tab-delimited text; Excel writes those in a legacy encoding that damages accented characters.
 
 ### Tune Generation
 
@@ -184,7 +184,7 @@ GID detects files named with the `base_<number>.<ext>` pattern, such as `sina_1.
 To add shared context first:
 
 ```bash
-python3 gid.py /path/to/images --init-tsv --composites
+python3 gid.py /path/to/images --init --composites
 ```
 
 Then add context to the composite row and rerun with `--composites`.
@@ -244,7 +244,7 @@ The config file is strict JSON. Comments are not allowed in the file itself.
   },
   "output": {
     "output_folder_name": "Described",
-    "tsv_filename": "descriptions.tsv"
+    "workbook_filename": "descriptions.xlsx"
   },
   "prompt": {
     "system_prompt": "default",
@@ -268,11 +268,11 @@ Key settings:
 | `parameters.temperature` | Sampling temperature. Not every model supports this parameter. |
 | `parameters.max_tokens` | Maximum response tokens, mapped to `max_output_tokens`, which includes reasoning tokens. A response cut off at this limit is retried once with double the budget. |
 | `parameters.reasoning_effort` | `none`, `low`, `medium`, `high`, `xhigh`, or `null` to omit reasoning. |
-| `processing.no_copy` | `true` writes TSV output in the source folder instead of `Described/`. |
+| `processing.no_copy` | `true` writes the workbook in the source folder instead of `Described/` and copies nothing. |
 | `processing.no_composites` | `true` disables automatic composite detection. |
 | `processing.max_workers` | Maximum worker threads in folder mode; `0` means auto. |
-| `output.output_folder_name` | Folder used for copied output and TSVs when copying is enabled. |
-| `output.tsv_filename` | TSV filename. |
+| `output.output_folder_name` | Folder used for copied output and the workbook when copying is enabled. |
+| `output.workbook_filename` | Workbook filename. A legacy `.tsv` with the same stem is imported once when no workbook exists. |
 | `prompt.format_retry_prompt` | Sent with the images, once, when a response breaks the SHORT/LONG layout. Placeholders: `{problems}`, `{previous_response}`. |
 | `prompt.short_retry_prompt` | Sent text-only, up to twice, when the short description is too long or ends mid-phrase. Placeholders: `{problems}`, `{short_description}`, `{long_description}`. |
 | `prompt.short_description_max_words` | Maximum words in the short description. Never enforced by truncation; see Prompt Behavior. |
@@ -307,7 +307,7 @@ SHORT: <short description>
 LONG: <long description>
 ```
 
-GID strips these labels when saving to the TSV. Long descriptions are saved as one plain-text paragraph. If the model returns a malformed response, GID rejects that result instead of inventing a filename from the long description.
+GID strips these labels when saving to the workbook. Long descriptions are saved as one plain-text paragraph. If the model returns a malformed response, GID rejects that result instead of inventing a filename from the long description.
 
 The short description is never truncated. If the model returns more than `short_description_max_words` words, or a phrase that ends mid-thought (for example on "with", a possessive, or an unclosed quotation mark), GID sends a small text-only follow-up asking the model to rewrite it, up to two times, and reports an error for that image if it still cannot get a valid one. If a response does not use the SHORT/LONG layout at all, GID resends the images once together with the rejected response and the reason.
 
@@ -315,9 +315,9 @@ The bundled default prompt requires every piece of visible text in an image to b
 
 ## Output Format
 
-### TSV
+### Workbook
 
-Folder mode writes a tab-separated file with these columns:
+Folder mode writes `descriptions.xlsx` with one sheet named `descriptions` and these columns:
 
 1. `OriginalFilename`: Original image filename.
 2. `ShortDescription`: Short description suitable for filenames, at most `short_description_max_words` words as written by the model, never truncated.
@@ -326,13 +326,13 @@ Folder mode writes a tab-separated file with these columns:
 5. `Composite`: `yes` or `no`; `yes` means the row represents a composite image set.
 6. `SHA1`: SHA-1 hash used for deduplication and resumability.
 
-The TSV is UTF-8 with a byte-order mark, so Excel and other spreadsheet apps detect the encoding when the file is opened directly, and it has one physical row per image. If another program re-saves the TSV in a different encoding, GID stops with an error naming the file instead of reading mangled text; re-save it as UTF-8 or delete it to regenerate. Long descriptions are collapsed to one plain-text paragraph. Newlines inside context are stored as literal `\n` sequences so spreadsheet apps keep rows and columns stable. Common smart punctuation is normalized to ASCII punctuation.
+The workbook is Unicode throughout, so accented characters survive editing in Excel on any platform. Every value is stored as text, so a description that starts with `=` is never treated as a formula. Long descriptions are one plain-text paragraph, and line breaks typed into a description cell are collapsed on the next run. Newlines inside `Context` are preserved. Common smart punctuation is normalized to ASCII punctuation. On Windows, GID refuses to start while the workbook is open in Excel, so a batch is never lost to a locked file.
 
 If `ShortDescription` or `LongDescription` is empty or appears malformed, including generic long-description openings such as "The image shows" or a short description that is over the word limit or ends mid-phrase, GID will regenerate that row.
 
-### Excel
+### Legacy TSV Files
 
-`--make-excel` writes `descriptions.xlsx` next to the TSV. The spreadsheet uses the same columns, restores context newlines, preserves Unicode, and keeps long descriptions as one paragraph.
+Folders described by earlier versions of GID contain `descriptions.tsv`. When no workbook exists yet, GID imports the TSV once, writes the workbook, and ignores the TSV from then on. A TSV that another program re-saved in a non-UTF-8 encoding is rejected with a message naming the file; re-save it as UTF-8 or delete it to regenerate.
 
 ### Described Folder
 
@@ -342,11 +342,10 @@ Unless `--no-copy` is set, processed images are copied to `Described/` with file
 
 ```text
 usage: gid.py [-h] [--recurse] [-t TEMPERATURE] [-l LENGTH] [-n] [-k API_KEY]
-              [-w WORKERS] [-v] [-c CONFIG] [--init-tsv] [--force-init-tsv]
-              [--make-excel] [--composites | --no-composites]
-              [--show-composites] [--write-sample-config [PATH]] [-m MODEL]
-              [-p NAME] [--reasoning-effort {none,low,medium,high,xhigh} |
-              --no-reasoning]
+              [-w WORKERS] [-v] [-c CONFIG] [--init] [--force-init]
+              [--composites | --no-composites] [--show-composites]
+              [--write-sample-config [PATH]] [-m MODEL] [-p NAME]
+              [--reasoning-effort {none,low,medium,high,xhigh} | --no-reasoning]
               [path]
 
 positional arguments:
@@ -373,13 +372,13 @@ options:
   -c, --config CONFIG   Path to the configuration file (default: config.json
                         in the folder being described, then next to gid.py,
                         then ~/.config/gid/config.json)
-  --init-tsv            Generate TSV with hashes and empty
-                        descriptions/context (folder mode only; use
-                        --composites to include composite rows).
-  --force-init-tsv      Reset the TSV when using --init-tsv instead of
+  --init, --init-tsv    Create the workbook with hashes and empty
+                        descriptions/context, without calling the API (folder
+                        mode only; use --composites to include composite
+                        rows).
+  --force-init, --force-init-tsv
+                        Reset the workbook when using --init instead of
                         preserving existing rows/context.
-  --make-excel          Generate an Excel .xlsx file from the existing TSV
-                        (folder mode only).
   --composites          Enable automatic composite detection (folder mode
                         only).
   --no-composites       Disable automatic composite detection (default; useful

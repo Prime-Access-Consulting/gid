@@ -16,7 +16,7 @@
   },
   "output": {
     "output_folder_name": "Described",
-    "tsv_filename": "descriptions.tsv"
+    "workbook_filename": "descriptions.xlsx"
   },
   "prompt": {
     "system_prompt": "default",
