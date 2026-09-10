@@ -30,7 +30,7 @@ python3 gid.py /path/to/images --temperature 0.8 --length 1000 --no-copy
 python3 gid.py /path/to/images --config /path/to/config.json
 
 # Select a different model
-python3 gid.py /path/to/images --model gpt-5.5
+python3 gid.py /path/to/images --model gpt-5.6
 
 # Select reasoning effort for supported reasoning models
 python3 gid.py /path/to/images --reasoning-effort high
@@ -71,7 +71,7 @@ python3 gid.py /path/to/images --verbose
 - `-c`, `--config`: path to config file
 
 ## Configuration Resolution
-1. Start from `Config.DEFAULT_CONFIG` in `gid.py`, which defines the real defaults (model `gpt-5.5`; temperature `1.0`; max tokens `4000`; reasoning effort `medium`; composites disabled; max workers `0`; prompt defaults).
+1. Start from `Config.DEFAULT_CONFIG` in `gid.py`, which defines the real defaults (model `gpt-5.6`; temperature `1.0`; max tokens `4000`; reasoning effort `medium`; composites disabled; max workers `0`; prompt defaults).
 2. If a user config file exists, deep-merge it over the code defaults. The first match wins:
    - `--config` path, else `config.json` in the folder being described (for a single image, its folder), else `config.json` next to `gid.py`, else `~/.config/gid/config.json`
    - The current working directory is never searched

@@ -62,7 +62,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 # Valid image extensions
 VALID_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp")
 
-DEFAULT_MODEL = "gpt-5.5"
+DEFAULT_MODEL = "gpt-5.6"
 REASONING_EFFORT_VALUES = ("none", "low", "medium", "high", "xhigh")
 DEFAULT_REASONING_EFFORT = "medium"
 RECURSE_SKIP_DIR_NAMES = {

@@ -1,7 +1,7 @@
 {
   "api": {
     "api_key": "...",
-    "model": "gpt-5.5"
+    "model": "gpt-5.6"
   },
   "parameters": {
     "temperature": 1.0,
