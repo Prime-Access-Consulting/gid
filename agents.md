@@ -86,7 +86,7 @@ Prompt fields can be inline prompt text or prompt file references. Bare path-lik
   - Sorts filenames case-insensitively and preserves that order for new single-image TSV rows, while API calls still run in parallel.
   - Writes `descriptions.tsv` (header only if file does not exist):
     - `OriginalFilename`, `ShortDescription`, `LongDescription`, `Context`, `Composite`, `SHA1`
-  - TSV files are plain UTF-8 with one physical row per image.
+  - TSV files are UTF-8 with a byte-order mark (written with `utf-8-sig`, read with `utf-8-sig`) so spreadsheet apps detect the encoding; one physical row per image. A TSV that is not valid UTF-8 (typically re-saved by another program) is a fatal error with guidance, never decoded with a guessed encoding.
   - Long descriptions are collapsed to one plain-text paragraph.
   - Newlines inside context are stored as literal `\n` sequences so spreadsheet apps keep rows and columns stable.
   - Common smart punctuation is normalized to ASCII punctuation in TSV text fields.

@@ -587,7 +587,20 @@ class TSVHandler:
         """
         if not os.path.exists(self.tsv_path):
             return
-        
+
+        try:
+            self._load_rows()
+        except UnicodeDecodeError as e:
+            bad_byte = e.object[e.start] if e.start < len(e.object) else None
+            byte_text = f" (byte 0x{bad_byte:02x})" if bad_byte is not None else ""
+            raise ValueError(
+                f"{self.tsv_path} is not valid UTF-8{byte_text}. It was probably re-saved by another "
+                "program in a different encoding. Re-save it as UTF-8, or delete it to regenerate the "
+                "descriptions."
+            ) from e
+
+    def _load_rows(self) -> None:
+        """Read the TSV rows into memory; raises UnicodeDecodeError on non-UTF-8 files."""
         with open(self.tsv_path, "r", encoding="utf-8-sig", newline="") as tsv_file:
             reader = csv.reader(tsv_file, delimiter="\t")
             try:
@@ -721,7 +734,9 @@ class TSVHandler:
             text=True
         )
         try:
-            with os.fdopen(fd, "w", encoding="utf-8", newline="") as tsv_file:
+            # utf-8-sig writes a byte-order mark so Excel and other spreadsheet apps
+            # detect UTF-8 when the file is opened directly instead of assuming ANSI.
+            with os.fdopen(fd, "w", encoding="utf-8-sig", newline="") as tsv_file:
                 writer = csv.writer(tsv_file, delimiter="\t", lineterminator="\n")
                 writer.writerow([
                     "OriginalFilename",

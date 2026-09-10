@@ -326,7 +326,7 @@ Folder mode writes a tab-separated file with these columns:
 5. `Composite`: `yes` or `no`; `yes` means the row represents a composite image set.
 6. `SHA1`: SHA-1 hash used for deduplication and resumability.
 
-The TSV is plain UTF-8 with one physical row per image. Long descriptions are collapsed to one plain-text paragraph. Newlines inside context are stored as literal `\n` sequences so spreadsheet apps keep rows and columns stable. Common smart punctuation is normalized to ASCII punctuation.
+The TSV is UTF-8 with a byte-order mark, so Excel and other spreadsheet apps detect the encoding when the file is opened directly, and it has one physical row per image. If another program re-saves the TSV in a different encoding, GID stops with an error naming the file instead of reading mangled text; re-save it as UTF-8 or delete it to regenerate. Long descriptions are collapsed to one plain-text paragraph. Newlines inside context are stored as literal `\n` sequences so spreadsheet apps keep rows and columns stable. Common smart punctuation is normalized to ASCII punctuation.
 
 If `ShortDescription` or `LongDescription` is empty or appears malformed, including generic long-description openings such as "The image shows" or a short description that is over the word limit or ends mid-phrase, GID will regenerate that row.
 
