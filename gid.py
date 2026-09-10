@@ -85,10 +85,33 @@ class UnsupportedModelParameterError(ValueError):
     """Raised when the selected model rejects a requested API parameter."""
 
 
+class ResponseIncompleteError(ValueError):
+    """Raised when the model stopped before finishing its response."""
+
+
+# Smart punctuation is normalized to ASCII in TSV text and in generated filenames.
+SMART_PUNCTUATION_TRANSLATION = str.maketrans({
+    "\u2018": "'",
+    "\u2019": "'",
+    "\u201A": "'",
+    "\u201B": "'",
+    "\u201C": '"',
+    "\u201D": '"',
+    "\u201E": '"',
+    "\u201F": '"',
+    "\u2013": "-",
+    "\u2014": "-",
+    "\u2212": "-",
+    "\u2026": "...",
+    "\u00A0": " "
+})
+
+
 def render_prompt_template(
     template: str,
     short_description_max_words: int,
-    context: Optional[str] = None
+    context: Optional[str] = None,
+    extra: Optional[Dict[str, str]] = None
 ) -> str:
     """Render supported config prompt placeholders."""
     rendered = template.replace(
@@ -97,6 +120,8 @@ def render_prompt_template(
     )
     if context is not None:
         rendered = rendered.replace("{context}", context)
+    for key, value in (extra or {}).items():
+        rendered = rendered.replace("{" + key + "}", value)
     return rendered
 
 
@@ -134,6 +159,21 @@ class Config:
                 "Additional image facts provided by the user (treat as true and naturally incorporate that "
                 "knowledge if helpful or necessary to inform the description): {context}"
             ),
+            "format_retry_prompt": (
+                "Your previous response was rejected because it {problems}. The rejected response was:\n\n"
+                "{previous_response}\n\n"
+                "Describe the image or images again, following the required SHORT/LONG output format exactly."
+            ),
+            "short_retry_prompt": (
+                "The short description below was rejected because it {problems}. Rewrite it as a complete, "
+                "self-contained phrase of no more than {short_description_max_words} words that names the main "
+                "subject. Keep the original meaning, and use the long description only to decide what matters "
+                "most. Do not use quotation marks of any kind or the characters \\ / : * ? \" < > |. Do not end "
+                "with punctuation, an article, a preposition, a conjunction, or a possessive. Reply with exactly "
+                "one line in the form: SHORT: <short description>\n\n"
+                "Rejected short description: {short_description}\n\n"
+                "Long description: {long_description}"
+            ),
             "short_description_max_words": 10
         }
     }
@@ -148,6 +188,8 @@ class Config:
         "single_image_prompt",
         "composite_image_prompt",
         "context_template",
+        "format_retry_prompt",
+        "short_retry_prompt",
         "short_description_max_words"
     )
     PROMPT_FILE_FIELDS = (
@@ -155,7 +197,9 @@ class Config:
         "instructions_prompt",
         "single_image_prompt",
         "composite_image_prompt",
-        "context_template"
+        "context_template",
+        "format_retry_prompt",
+        "short_retry_prompt"
     )
     
     @staticmethod
@@ -480,8 +524,10 @@ class FileHelper:
     def sanitize_filename(name: str) -> str:
         """
         Replace invalid Windows filename characters (\\/:*?"<>|) with spaces,
-        and remove trailing periods/spaces.
+        and remove trailing periods/spaces. Smart punctuation is normalized first
+        so filenames match the TSV text exactly.
         """
+        name = name.translate(SMART_PUNCTUATION_TRANSLATION)
         name = re.sub(r'[\\/:*?"<>|]+', " ", name)
         name = re.sub(r"\s+", " ", name).strip()
         name = name.rstrip(" .")
@@ -513,22 +559,6 @@ class FileHelper:
 class TSVHandler:
     """Class to handle TSV file operations."""
 
-    SMART_PUNCTUATION_TRANSLATION = str.maketrans({
-        "\u2018": "'",
-        "\u2019": "'",
-        "\u201A": "'",
-        "\u201B": "'",
-        "\u201C": '"',
-        "\u201D": '"',
-        "\u201E": '"',
-        "\u201F": '"',
-        "\u2013": "-",
-        "\u2014": "-",
-        "\u2212": "-",
-        "\u2026": "...",
-        "\u00A0": " "
-    })
-    
     def __init__(self, tsv_path: str):
         self.tsv_path = tsv_path
         self.entries: List[TSVEntry] = []
@@ -540,7 +570,7 @@ class TSVHandler:
     @staticmethod
     def _escape_newlines(text: str) -> str:
         """Escape actual newlines as \\n for single-line TSV rows."""
-        text = text.translate(TSVHandler.SMART_PUNCTUATION_TRANSLATION)
+        text = text.translate(SMART_PUNCTUATION_TRANSLATION)
         return text.replace('\n', '\\n').replace('\r', '\\r')
 
     @staticmethod
@@ -795,7 +825,10 @@ class ImageDescriber:
         r"(?:\s+that)?\s*[:,-]?\s*(?P<body>\S.*)$",
         re.IGNORECASE | re.DOTALL
     )
-    
+    # Extra API calls allowed to fix a response instead of saving a broken one.
+    MAX_FORMAT_RETRIES = 1
+    MAX_SHORT_RETRIES = 2
+
     def __init__(
         self,
         api_key: str,
@@ -808,6 +841,8 @@ class ImageDescriber:
         single_image_prompt: Optional[str] = None,
         composite_image_prompt: Optional[str] = None,
         context_template: Optional[str] = None,
+        format_retry_prompt: Optional[str] = None,
+        short_retry_prompt: Optional[str] = None,
         short_description_max_words: Optional[int] = None
     ):
         if OpenAI is None:
@@ -831,6 +866,10 @@ class ImageDescriber:
             raise ValueError("Missing prompt configuration value: composite_image_prompt.")
         if not context_template:
             raise ValueError("Missing prompt configuration value: context_template.")
+        if not format_retry_prompt:
+            raise ValueError("Missing prompt configuration value: format_retry_prompt.")
+        if not short_retry_prompt:
+            raise ValueError("Missing prompt configuration value: short_retry_prompt.")
         if not isinstance(short_description_max_words, int) or short_description_max_words < 1:
             raise ValueError("prompt.short_description_max_words must be an integer of at least 1.")
         self.short_description_max_words = short_description_max_words
@@ -842,11 +881,16 @@ class ImageDescriber:
         self.single_image_prompt = single_image_prompt
         self.composite_image_prompt = composite_image_prompt
         self.context_template = context_template
+        self.format_retry_prompt = format_retry_prompt
+        self.short_retry_prompt = short_retry_prompt
 
     @staticmethod
     def _label_pattern(label: str) -> str:
         """Return a tolerant response label pattern for SHORT/LONG labels."""
-        return rf"(?m)^\s*{label}(?:\s*description|description)?\b\s*(?:[:\uFF1A]|[\-\u2013\u2014]\s+)\s*"
+        return (
+            rf"(?m)^[ \t*_#]*{label}(?:\s*description)?\b[*_]*\s*"
+            rf"(?:[:\uFF1A][*_]*|[\-\u2013\u2014]\s+)\s*"
+        )
 
     @staticmethod
     def _normalize_response_text(text: str) -> str:
@@ -870,39 +914,44 @@ class ImageDescriber:
         """Return a lowercased word stripped of edge punctuation."""
         return re.sub(r"^[^A-Za-z0-9]+|[^A-Za-z0-9]+$", "", word).lower()
 
+    @staticmethod
+    def _has_unbalanced_quotes(text: str) -> bool:
+        """Return True when straight or curly double quotes do not pair up."""
+        if text.count('"') % 2 == 1:
+            return True
+        return text.count("\u201C") != text.count("\u201D")
+
     @classmethod
-    def _trim_dangling_short_end(cls, short_desc: str) -> str:
-        """Remove obvious dangling tail words created by max-word trimming."""
-        short_desc = short_desc.strip().rstrip(" .,:;")
-        if short_desc.count('"') % 2 == 1:
-            short_desc = short_desc[:short_desc.rfind('"')].strip().rstrip(" .,:;")
+    def _dangling_tail(cls, short_desc: str) -> Optional[str]:
+        """Return the trailing word(s) when a short description ends mid-phrase."""
+        words = short_desc.strip().rstrip(" .,:;").split()
+        if not words:
+            return None
+        last_word = cls._plain_word(words[-1])
+        if last_word in cls.DANGLING_SHORT_END_WORDS:
+            return words[-1]
+        if re.search(r"['\u2019]s$", words[-1].rstrip(" .,:;"), flags=re.IGNORECASE):
+            return words[-1]
+        if len(words) >= 2 and last_word.endswith("ing"):
+            if cls._plain_word(words[-2]) in cls.DANGLING_SHORT_END_WORDS:
+                return " ".join(words[-2:])
+        return None
 
-        while short_desc:
-            words = short_desc.split()
-            if not words:
-                return ""
-
-            if len(words) >= 2:
-                previous_word = cls._plain_word(words[-2])
-                last_word = cls._plain_word(words[-1])
-                if previous_word in cls.DANGLING_SHORT_END_WORDS and last_word.endswith("ing"):
-                    short_desc = " ".join(words[:-1]).strip().rstrip(" .,:;")
-                    continue
-
-            last_word = cls._plain_word(words[-1])
-            if last_word in cls.DANGLING_SHORT_END_WORDS:
-                short_desc = " ".join(words[:-1]).strip().rstrip(" .,:;")
-                continue
-            break
-        return short_desc
+    @classmethod
+    def _contains_label(cls, text: str) -> bool:
+        """Return True when a SHORT or LONG label leaked into field text."""
+        for label in ("short", "long"):
+            if re.search(cls._label_pattern(label), text, flags=re.IGNORECASE):
+                return True
+        return False
 
     def _clean_short_description(self, short_desc: str) -> str:
-        """Clean a short description without inventing new content."""
+        """Normalize a short description without truncating or rewording it."""
         short_desc = self._normalize_response_text(short_desc)
         short_desc = re.sub(self._label_pattern("short"), "", short_desc, flags=re.IGNORECASE)
-        short_desc = self._collapse_inline_whitespace(short_desc).strip('"')
-        short_desc = self._limit_short_description(short_desc)
-        return self._trim_dangling_short_end(short_desc)
+        short_desc = self._collapse_inline_whitespace(short_desc)
+        short_desc = short_desc.strip("*_ ").strip('"\u201C\u201D')
+        return short_desc.strip().rstrip(" .,:;")
 
     def _clean_long_description(self, long_desc: str) -> str:
         """Clean labels and plain-text formatting from a long description."""
@@ -945,68 +994,81 @@ class ImageDescriber:
         )
 
     @classmethod
+    def short_description_problems(
+        cls,
+        short_desc: str,
+        short_description_max_words: int
+    ) -> List[str]:
+        """Return the reasons a short description is unusable, or an empty list."""
+        short_desc = cls._normalize_response_text(short_desc or "").strip()
+        if not short_desc:
+            return ["is empty"]
+        problems: List[str] = []
+        if "\n" in short_desc:
+            problems.append("spans more than one line")
+        if cls._contains_label(short_desc):
+            problems.append("contains a SHORT or LONG label")
+        if "_" in short_desc:
+            problems.append("contains an underscore")
+        word_count = len(short_desc.split())
+        if word_count > short_description_max_words:
+            problems.append(
+                f"is {word_count} words long, more than the limit of {short_description_max_words}"
+            )
+        if cls._has_unbalanced_quotes(short_desc):
+            problems.append("has unbalanced quotation marks")
+        tail = cls._dangling_tail(short_desc)
+        if tail:
+            problems.append(f"ends mid-phrase on '{tail}'")
+        return problems
+
+    @classmethod
+    def long_description_problems(cls, long_desc: str) -> List[str]:
+        """Return the reasons a long description is unusable, or an empty list."""
+        long_desc = cls._normalize_response_text(long_desc or "").strip()
+        if not long_desc:
+            return ["is empty"]
+        problems: List[str] = []
+        if cls._contains_label(long_desc):
+            problems.append("contains a SHORT or LONG label")
+        if "\n" in long_desc:
+            problems.append("contains line breaks")
+        if re.search(r"[*`#]", long_desc) or re.search(r"(?<!\w)_{1,3}[^_]+?_{1,3}(?!\w)", long_desc):
+            problems.append("contains Markdown formatting")
+        if cls.GENERIC_LONG_DESCRIPTION_OPENING_PATTERN.search(long_desc):
+            problems.append("opens with generic wording such as 'The image shows'")
+        return problems
+
+    @classmethod
     def description_fields_are_malformed(
         cls,
         short_desc: str,
         long_desc: str,
         short_description_max_words: int
     ) -> bool:
-        """Return True when stored descriptions look like parser failures."""
-        short_desc = cls._normalize_response_text(short_desc or "").strip()
-        long_desc = cls._normalize_response_text(long_desc or "").strip()
-        if not short_desc or not long_desc:
-            return True
-
-        short_label = cls._label_pattern("short")
-        long_label = cls._label_pattern("long")
-        if re.search(short_label, short_desc, flags=re.IGNORECASE):
-            return True
-        if re.search(long_label, short_desc, flags=re.IGNORECASE):
-            return True
-        if re.search(short_label, long_desc, flags=re.IGNORECASE):
-            return True
-        if re.search(long_label, long_desc, flags=re.IGNORECASE):
-            return True
-        if "\n" in short_desc:
-            return True
-        if "\n" in long_desc or "\r" in long_desc:
-            return True
-        if re.search(r"[*`#]", long_desc):
-            return True
-        if re.search(r"(?<!\w)_{1,3}[^_]+?_{1,3}(?!\w)", long_desc):
-            return True
-        if "_" in short_desc:
-            return True
-        if len(short_desc.split()) > short_description_max_words:
-            return True
-        if cls._trim_dangling_short_end(short_desc) != short_desc.rstrip(" .,:;"):
-            return True
-        if cls.GENERIC_LONG_DESCRIPTION_OPENING_PATTERN.search(long_desc):
-            return True
-        return False
+        """Return True when stored descriptions look like parser failures or truncation."""
+        return bool(
+            cls.short_description_problems(short_desc, short_description_max_words)
+            or cls.long_description_problems(long_desc)
+        )
 
     def _parse_description_response(self, text_response: str) -> Optional[Tuple[str, str]]:
-        """Parse the model response into short and long descriptions."""
+        """
+        Split the model response into cleaned (short, long) descriptions.
+
+        Returns None when the response does not follow a usable layout. A SHORT
+        value that wraps onto extra lines is joined into one line here and left
+        for word-count validation, since that is really an over-long short.
+        """
         text_response = self._normalize_response_text(text_response)
-        short_pattern = self._label_pattern("short")
-        long_pattern = self._label_pattern("long")
-        short_match = re.search(short_pattern, text_response, flags=re.IGNORECASE)
-        long_match = re.search(long_pattern, text_response, flags=re.IGNORECASE)
+        short_match = re.search(self._label_pattern("short"), text_response, flags=re.IGNORECASE)
+        long_match = re.search(self._label_pattern("long"), text_response, flags=re.IGNORECASE)
         if short_match and long_match and long_match.start() > short_match.end():
-            raw_short_part = text_response[short_match.end():long_match.start()].strip()
-            if "\n" in raw_short_part:
-                return None
-            short_part = self._clean_short_description(raw_short_part)
+            short_part = self._clean_short_description(text_response[short_match.end():long_match.start()])
             long_part = self._clean_long_description(text_response[long_match.end():])
-            if (
-                short_part and long_part
-                and not self.description_fields_are_malformed(
-                    short_part,
-                    long_part,
-                    self.short_description_max_words
-                )
-            ):
+            if short_part and long_part:
                 return short_part, long_part
+            return None
 
         if short_match or long_match:
             return None
@@ -1015,33 +1077,162 @@ class ImageDescriber:
         # Only accept it if the first line plausibly fits the short-description field.
         lines = [line.strip() for line in text_response.splitlines() if line.strip()]
         if len(lines) >= 2:
-            first_line = lines[0]
-            first_line_words = first_line.split()
+            first_line_words = lines[0].split()
             if first_line_words and len(first_line_words) <= self.short_description_max_words + 5:
-                short_part = self._clean_short_description(first_line)
+                short_part = self._clean_short_description(lines[0])
                 long_part = self._clean_long_description("\n".join(lines[1:]))
-                if (
-                    short_part and long_part
-                    and not self.description_fields_are_malformed(
-                        short_part,
-                        long_part,
-                        self.short_description_max_words
-                    )
-                ):
+                if short_part and long_part:
                     return short_part, long_part
 
         return None
-    
-    def _limit_short_description(self, short_desc: str) -> str:
-        """Trim short description to the configured max word count."""
-        max_words = self.short_description_max_words
-        if not max_words or max_words <= 0:
-            return short_desc
-        words = short_desc.split()
-        if len(words) <= max_words:
-            return short_desc
-        return " ".join(words[:max_words])
-    
+
+    def _format_problems(self, parsed: Optional[Tuple[str, str]]) -> List[str]:
+        """Return reasons a parsed response must be regenerated in full."""
+        if parsed is None:
+            return ["did not use the required layout of a SHORT line followed by a LONG line"]
+        return [
+            f"has a long description that {problem}"
+            for problem in self.long_description_problems(parsed[1])
+        ]
+
+    def _build_instructions(self, context: str) -> str:
+        """Return the system prompt, with user-supplied context appended when present."""
+        instructions = self.system_prompt
+        if not context.strip():
+            return instructions
+        context_value = context.strip()
+        template = self.context_template or ""
+        if "{context}" in template:
+            context_text = render_prompt_template(
+                template,
+                self.short_description_max_words,
+                context_value
+            )
+        else:
+            rendered_template = render_prompt_template(
+                template,
+                self.short_description_max_words
+            )
+            context_text = f"{rendered_template} {context_value}".strip() if rendered_template else context_value
+        return f"{instructions.strip()}\n\n{context_text}"
+
+    def _base_response_params(self) -> Dict[str, Any]:
+        """Return the model, token, temperature, and reasoning parameters shared by every call."""
+        params: Dict[str, Any] = {
+            "model": self.model,
+            "max_output_tokens": self.max_tokens
+        }
+        if self.temperature is not None and self.temperature != 1.0:
+            params["temperature"] = self.temperature
+        if self.reasoning_effort is not None:
+            params["reasoning"] = {"effort": self.reasoning_effort}
+        return params
+
+    @staticmethod
+    def _incomplete_reason(response: Any) -> Optional[str]:
+        """Return why a response stopped early, or None when it completed."""
+        status = getattr(response, "status", None)
+        if status == "failed":
+            error = getattr(response, "error", None)
+            message = getattr(error, "message", None) if error is not None else None
+            raise ValueError(f"API reported a failed response: {message or 'no details'}")
+        if status != "incomplete":
+            return None
+        details = getattr(response, "incomplete_details", None)
+        reason = getattr(details, "reason", None) if details is not None else None
+        return reason or "unknown"
+
+    def _send(self, response_params: Dict[str, Any]) -> Any:
+        """Send one Responses API request, translating known parameter rejections."""
+        try:
+            return self.client.responses.create(**response_params)
+        except Exception as e:
+            if "temperature" in response_params and self._is_unsupported_temperature_error(e):
+                raise UnsupportedModelParameterError(
+                    f"Model '{self.model}' does not support temperature. "
+                    "Remove --temperature / -t or set parameters.temperature to 1.0 in config, "
+                    "or choose a model that supports temperature."
+                ) from e
+            raise
+
+    def _create_response_text(self, response_params: Dict[str, Any], label: str) -> str:
+        """
+        Call the API and return its text.
+
+        A response cut off at max_output_tokens is retried once with double the
+        budget, because a truncated description would otherwise be saved as if
+        it were complete.
+        """
+        response = self._send(response_params)
+        reason = self._incomplete_reason(response)
+        if reason == "max_output_tokens":
+            budget = response_params["max_output_tokens"]
+            retry_params = dict(response_params)
+            retry_params["max_output_tokens"] = budget * 2
+            logger.warning(
+                f"Response for {label} was cut off at max_output_tokens={budget}; "
+                f"retrying once with {budget * 2}."
+            )
+            response = self._send(retry_params)
+            reason = self._incomplete_reason(response)
+            if reason == "max_output_tokens":
+                raise ResponseIncompleteError(
+                    f"Response was cut off at max_output_tokens={budget * 2}. "
+                    "Increase --length / parameters.max_tokens."
+                )
+        if reason:
+            raise ResponseIncompleteError(f"Response was incomplete ({reason}).")
+        text = getattr(response, "output_text", None)
+        if not text or not text.strip():
+            raise ValueError("Empty response from API.")
+        return text.strip()
+
+    def _retry_for_format(
+        self,
+        response_params: Dict[str, Any],
+        previous_text: str,
+        problems: List[str],
+        label: str
+    ) -> str:
+        """Resend the images with a note explaining why the previous response was rejected."""
+        note = render_prompt_template(
+            self.format_retry_prompt,
+            self.short_description_max_words,
+            extra={
+                "problems": "; ".join(problems),
+                "previous_response": previous_text
+            }
+        )
+        original_content = response_params["input"][0]["content"]
+        retry_params = dict(response_params)
+        retry_params["input"] = [{
+            "role": "user",
+            "content": list(original_content) + [{"type": "input_text", "text": note}]
+        }]
+        return self._create_response_text(retry_params, label)
+
+    def _retry_for_short(self, short_desc: str, long_desc: str, problems: List[str], label: str) -> str:
+        """Ask the model, text-only, to rewrite an unusable short description."""
+        prompt_text = render_prompt_template(
+            self.short_retry_prompt,
+            self.short_description_max_words,
+            extra={
+                "problems": "; ".join(problems),
+                "short_description": short_desc,
+                "long_description": long_desc
+            }
+        )
+        params = self._base_response_params()
+        params["input"] = [{"role": "user", "content": [{"type": "input_text", "text": prompt_text}]}]
+        text = self._normalize_response_text(self._create_response_text(params, label))
+        short_match = re.search(self._label_pattern("short"), text, flags=re.IGNORECASE)
+        candidate = text[short_match.end():] if short_match else text
+        long_match = re.search(self._label_pattern("long"), candidate, flags=re.IGNORECASE)
+        if long_match:
+            candidate = candidate[:long_match.start()]
+        first_line = next((line for line in candidate.splitlines() if line.strip()), "")
+        return self._clean_short_description(first_line)
+
     def describe_image(self, image_path: str, context: str = "") -> Tuple[str, str]:
         """Call the OpenAI API to describe a single image."""
         return self.describe_images([image_path], context)
@@ -1049,85 +1240,75 @@ class ImageDescriber:
     def describe_images(self, image_paths: List[str], context: str = "") -> Tuple[str, str]:
         """
         Call the OpenAI API to generate short and long descriptions of one or more images.
-        Returns (short_desc, long_desc).
+
+        Returns (short_desc, long_desc). The short description is never truncated:
+        when the model overshoots the word limit or ends mid-phrase, it is asked to
+        rewrite the short description, and the row is reported as an error if it
+        still cannot produce a valid one. Returns ("Error", message) on failure.
         """
+        label = ", ".join(os.path.basename(path) for path in image_paths)
         try:
-            content = []
-            prompt_text = self.single_image_prompt
-            if len(image_paths) > 1:
-                prompt_text = self.composite_image_prompt
-            prompt_text = render_prompt_template(
-                prompt_text,
-                self.short_description_max_words
-            )
-            content.append({"type": "input_text", "text": prompt_text})
+            prompt_text = self.composite_image_prompt if len(image_paths) > 1 else self.single_image_prompt
+            content: List[Dict[str, str]] = [{
+                "type": "input_text",
+                "text": render_prompt_template(prompt_text, self.short_description_max_words)
+            }]
             for image_path in image_paths:
                 encoded_image = FileHelper.encode_image(image_path)
                 extension = os.path.splitext(image_path)[1][1:].lower()
-                data_url = f"data:image/{extension};base64,{encoded_image}"
-                content.append({"type": "input_image", "image_url": data_url})
+                content.append({
+                    "type": "input_image",
+                    "image_url": f"data:image/{extension};base64,{encoded_image}"
+                })
 
-            instructions = self.system_prompt
-            if context.strip():
-                context_value = context.strip()
-                template = self.context_template or ""
-                if "{context}" in template:
-                    context_text = render_prompt_template(
-                        template,
-                        self.short_description_max_words,
-                        context_value
+            response_params = self._base_response_params()
+            response_params["input"] = [{"role": "user", "content": content}]
+            response_params["instructions"] = self._build_instructions(context)
+
+            text_response = self._create_response_text(response_params, label)
+            parsed = self._parse_description_response(text_response)
+            format_attempts = 0
+            while True:
+                problems = self._format_problems(parsed)
+                if not problems:
+                    break
+                problem_text = "; ".join(problems)
+                if format_attempts >= self.MAX_FORMAT_RETRIES:
+                    logger.warning(f"Rejected response for {label}: it {problem_text}.")
+                    return "Error", f"Unexpected response format from API: it {problem_text}."
+                format_attempts += 1
+                logger.info(
+                    f"Response for {label} {problem_text}; asking the model to try again "
+                    f"({format_attempts} of {self.MAX_FORMAT_RETRIES})."
+                )
+                text_response = self._retry_for_format(response_params, text_response, problems, label)
+                parsed = self._parse_description_response(text_response)
+
+            short_desc, long_desc = parsed
+            short_attempts = 0
+            while True:
+                problems = self.short_description_problems(short_desc, self.short_description_max_words)
+                if not problems:
+                    break
+                problem_text = "; ".join(problems)
+                if short_attempts >= self.MAX_SHORT_RETRIES:
+                    logger.warning(
+                        f"Rejected short description for {label} after {short_attempts} rewrites: "
+                        f"it {problem_text}."
                     )
-                else:
-                    rendered_template = render_prompt_template(
-                        template,
-                        self.short_description_max_words
-                    )
-                    context_text = f"{rendered_template} {context_value}".strip() if rendered_template else context_value
-                instructions = f"{instructions.strip()}\n\n{context_text}"
+                    return "Error", f"Short description {problem_text} after {short_attempts} rewrite attempts."
+                short_attempts += 1
+                logger.info(
+                    f"Short description for {label} {problem_text}; asking the model to rewrite it "
+                    f"({short_attempts} of {self.MAX_SHORT_RETRIES})."
+                )
+                short_desc = self._retry_for_short(short_desc, long_desc, problems, label)
 
-            response_params = {
-                "model": self.model,
-                "input": [
-                    {
-                        "role": "user",
-                        "content": content
-                    }
-                ],
-                "instructions": instructions,
-                "max_output_tokens": self.max_tokens
-            }
-            if self.temperature is not None and self.temperature != 1.0:
-                response_params["temperature"] = self.temperature
-            if self.reasoning_effort is not None:
-                response_params["reasoning"] = {"effort": self.reasoning_effort}
-
-            try:
-                response = self.client.responses.create(**response_params)
-            except Exception as e:
-                if "temperature" in response_params and self._is_unsupported_temperature_error(e):
-                    raise UnsupportedModelParameterError(
-                        f"Model '{self.model}' does not support temperature. "
-                        "Remove --temperature / -t or set parameters.temperature to 1.0 in config, "
-                        "or choose a model that supports temperature."
-                    ) from e
-                raise
-            
-            text_response = response.output_text
-            if text_response is None:
-                logger.error("Empty response from API.")
-                return "Error", "Empty response from API"
-            text_response = text_response.strip()
-
-            parsed_response = self._parse_description_response(text_response)
-            if parsed_response:
-                return parsed_response
-
-            logger.warning(f"Unexpected response format for {image_path}")
-            return "Error", "Unexpected response format from API; expected SHORT and LONG labels."
+            return short_desc, long_desc
         except UnsupportedModelParameterError:
             raise
         except Exception as e:
-            logger.error(f"Error describing image {image_path}: {str(e)}")
+            logger.error(f"Error describing {label}: {str(e)}")
             return "Error", f"Error: {str(e)}"
 
 
@@ -1155,6 +1336,8 @@ class ImageProcessor:
         self.single_image_prompt = prompt_config.get("single_image_prompt")
         self.composite_image_prompt = prompt_config.get("composite_image_prompt")
         self.context_template = prompt_config.get("context_template")
+        self.format_retry_prompt = prompt_config.get("format_retry_prompt")
+        self.short_retry_prompt = prompt_config.get("short_retry_prompt")
         self.short_description_max_words = prompt_config.get("short_description_max_words")
         
         self.described_folder_path = FileHelper.described_folder_path(folder_path, self.output_folder_name, self.no_copy)
@@ -1174,6 +1357,8 @@ class ImageProcessor:
                 single_image_prompt=self.single_image_prompt,
                 composite_image_prompt=self.composite_image_prompt,
                 context_template=self.context_template,
+                format_retry_prompt=self.format_retry_prompt,
+                short_retry_prompt=self.short_retry_prompt,
                 short_description_max_words=self.short_description_max_words
             )
         self.progress_lock = Lock()
@@ -2018,6 +2203,8 @@ class CLI:
             single_image_prompt=config["prompt"]["single_image_prompt"],
             composite_image_prompt=config["prompt"]["composite_image_prompt"],
             context_template=config["prompt"]["context_template"],
+            format_retry_prompt=config["prompt"]["format_retry_prompt"],
+            short_retry_prompt=config["prompt"]["short_retry_prompt"],
             short_description_max_words=config["prompt"]["short_description_max_words"]
         )
         

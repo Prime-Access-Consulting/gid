@@ -57,7 +57,7 @@ python3 gid.py /path/to/images --verbose
 - `--reasoning-effort`: reasoning effort for supported models; choices are `none`, `low`, `medium`, `high`, `xhigh`
 - `--no-reasoning`: omit the API `reasoning` parameter for models that do not support it
 - `-t`, `--temperature`: sampling temperature
-- `-l`, `--length`: max tokens (mapped to `max_output_tokens`)
+- `-l`, `--length`: max tokens (mapped to `max_output_tokens`, which includes reasoning tokens); a response cut off at this limit is retried once with double the budget, then reported as an error
 - `--init-tsv`: generate TSV with hashes and empty descriptions/context (folder mode only, no API calls)
 - `--force-init-tsv`: reset the TSV during `--init-tsv` instead of preserving existing rows/context
 - `--make-excel`: generate an Excel .xlsx from the existing TSV (folder mode only, no API calls)
@@ -90,7 +90,7 @@ Prompt fields can be inline prompt text or prompt file references. Bare path-lik
   - Newlines inside context are stored as literal `\n` sequences so spreadsheet apps keep rows and columns stable.
   - Common smart punctuation is normalized to ASCII punctuation in TSV text fields.
   - Uses SHA-1 hashes to skip files already present in the TSV and to skip duplicates within the same run.
-  - If `ShortDescription` or `LongDescription` is empty or appears malformed for a hash, including generic long-description openings such as "The image shows", it will be reprocessed to fill in descriptions.
+  - If `ShortDescription` or `LongDescription` is empty or appears malformed for a hash, including generic long-description openings such as "The image shows" or a short description that is over the word limit or ends mid-phrase (dangling word, possessive, or unbalanced quotes), it will be reprocessed to fill in descriptions.
   - `--init-tsv` preserves existing matching rows by default; if content changes under the same filename/base, it preserves context but clears descriptions. `--force-init-tsv` resets rows.
   - Copies images into `Described/` by default; `--no-copy` keeps everything in the source folder.
   - Short description is sanitized for filename safety; collisions are resolved with `" 2"`, `" 3"`, ... up to 100.
@@ -118,7 +118,9 @@ Prompt fields can be inline prompt text or prompt file references. Bare path-lik
 - Sends `reasoning={"effort": <reasoning_effort>}` from config/CLI unless reasoning is disabled with config `null` or `--no-reasoning`. The default is `medium`.
 - If a row has `Context`, it is appended to the prompt as additional image facts (treated as true).
 - Composite rows use `prompt.composite_image_prompt` from config.
-- Short descriptions are trimmed to `short_description_max_words` (default 10).
+- Short descriptions are validated against `short_description_max_words` (default 10) and never truncated. An over-long short, or one that ends mid-phrase, triggers up to two text-only rewrite requests built from `prompt.short_retry_prompt`; if the model still cannot comply, the image is reported as an error and left for the next run.
+- A response that breaks the SHORT/LONG layout is resent once with the images plus `prompt.format_retry_prompt`, which quotes the rejected response and the reason.
+- The bundled default prompt mandates verbatim transcription of all visible text, including labels, credit lines, and fine print; text is never summarized.
 - The bundled instructions prompt instructs the model to output:
   - `SHORT: ...` on line 1
   - `LONG: ...` on line 2
@@ -126,6 +128,7 @@ Prompt fields can be inline prompt text or prompt file references. Bare path-lik
   - `SHORT:` and `LONG:` labels (with common punctuation like `:` or `-`)
   - Legacy two-line output only when the first line plausibly fits the short-description field
   - Malformed responses are rejected instead of using the first words of the long description as the short description
+  - A SHORT value that wraps onto extra lines is joined into one line and then judged by word count, so it goes through the short rewrite path rather than being rejected outright
 
 ## Code Style Notes
 - Standard library imports first, then third-party, then local

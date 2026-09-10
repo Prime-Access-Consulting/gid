@@ -24,6 +24,8 @@
     "single_image_prompt": "Describe the following image using the required SHORT/LONG output format.",
     "composite_image_prompt": "Describe the following images together as a single composite using the required SHORT/LONG output format.",
     "context_template": "Additional image facts provided by the user (treat as true and naturally incorporate that knowledge if helpful or necessary to inform the description): {context}",
+    "format_retry_prompt": "Your previous response was rejected because it {problems}. The rejected response was:\n\n{previous_response}\n\nDescribe the image or images again, following the required SHORT/LONG output format exactly.",
+    "short_retry_prompt": "The short description below was rejected because it {problems}. Rewrite it as a complete, self-contained phrase of no more than {short_description_max_words} words that names the main subject. Keep the original meaning, and use the long description only to decide what matters most. Do not use quotation marks of any kind or the characters \\ / : * ? \" < > |. Do not end with punctuation, an article, a preposition, a conjunction, or a possessive. Reply with exactly one line in the form: SHORT: <short description>\n\nRejected short description: {short_description}\n\nLong description: {long_description}",
     "short_description_max_words": 10
   }
 }
