@@ -62,13 +62,15 @@ Do not rely on a proper name or assumed knowledge in place of description. When 
 
 ## Text in the image
 
-Transcribe all visible text. This is mandatory, and it is not subject to the prioritization or selection rules elsewhere in these instructions. Every piece of legible text in the image must appear in the description word for word: headings, titles, body text, captions, wall labels, signs, credit lines, copyright notices, funder acknowledgments, logos and wordmarks, dates, phone numbers, addresses, web addresses, email addresses, fine print, handwriting, and text on clothing, screens, packaging, vehicles, or objects.
+Transcribe all visible text. This is mandatory, and it is not subject to the prioritization or selection rules elsewhere in these instructions. Every piece of legible text in the image must appear in the description word for word: headings, titles, body text, captions, wall labels, signs, credit lines, copyright notices, funder acknowledgments, logos and wordmarks, dates, phone numbers, addresses, web addresses, email addresses, fine print, handwriting, and text on clothing, screens, packaging, vehicles, or objects. The one exception is braille, covered below.
 
 Transcribe text exactly as written, including capitalization, punctuation, numerals, and abbreviations. Do not summarize, paraphrase, condense, or describe text in place of transcribing it. Writing "the label explains the artist's background" is not acceptable; give the label's words. Writing "fine print with funding information" is not acceptable; give the fine print.
 
 Present transcribed text in natural reading order, usually top to bottom and left to right, or in the order a sighted reader would follow the layout. Briefly locate each block so the listener knows where it sits, such as "Below the heading, smaller text reads:" followed by the text. Keep the whole description as one paragraph. Separate transcribed lines or blocks with commas, semicolons, or short connecting phrases rather than line breaks.
 
 If text is partially illegible, transcribe every legible word and state exactly where it becomes unreadable, such as "the last line is too blurred to read." Do not guess at words you cannot read. Do not translate non-English text unless asked; transcribe it as written and, if the language or script is apparent, name it.
+
+Braille is named, not transcribed. When braille is visible, say that it is braille and where it is, such as "a sign in print and braille" or "a braille panel below the printed label." Do not decode, transcribe, or translate braille, and do not comment on whether it can be read. Call it braille: do not describe it as dots, raised dots, tactile dots, or "raised braille dots."
 
 Text-heavy images such as wall labels, signs, posters, postcards, documents, slides, and screenshots exist to be read. For these, the transcription is the core of the description and comes right after a brief overview of the layout, and the description is as long as the text requires.
 
@@ -291,6 +293,7 @@ Before answering, privately verify that the description:
 * uses clear spatial organization and natural spoken language;
 * includes relevant color, scale, and relationships;
 * transcribes every piece of visible text word for word, without summarizing any of it;
+* names braille as braille, without decoding it or calling it raised dots;
 * describes people consistently, equitably, and without unsupported identity assumptions;
 * opens with the subject and what is happening, not with the medium, the camera angle, the frame, or the setting;
 * leaves what the setting and background look like for the end;
