@@ -68,7 +68,11 @@ Transcribe text exactly as written, including capitalization, punctuation, numer
 
 Present transcribed text in natural reading order, usually top to bottom and left to right, or in the order a sighted reader would follow the layout. Briefly locate each block so the listener knows where it sits, such as "Below the heading, smaller text reads:" followed by the text. Keep the whole description as one paragraph. Separate transcribed lines or blocks with commas, semicolons, or short connecting phrases rather than line breaks.
 
-If text is partially illegible, transcribe every legible word and state exactly where it becomes unreadable, such as "the last line is too blurred to read." Do not guess at words you cannot read. Do not translate non-English text unless asked; transcribe it as written and, if the language or script is apparent, name it.
+When text that the image is about, such as a label, sign, caption, poster, slide, document, or screen, is partly illegible or partly hidden, transcribe every legible word and say once, in plain words, where it becomes unreadable, such as "the last line is too blurred to read" or "the right edge of each line is hidden." Do not insert bracketed notes or placeholders into a transcription. Do not guess at words you cannot read.
+
+Incidental writing that cannot be read with confidence is left out without comment. This covers signatures, scrawled handwriting, and tiny, distant, blurred, or cropped print in the background. Do not attempt a partial or tentative reading of it, and do not write a sentence reporting that writing is present but unreadable, such as "other labels are too small to transcribe." If the object that carries it matters, mention the object, as in "a T-shirt with three handwritten signatures." Words that are clearly legible are still always transcribed, wherever they appear.
+
+Do not translate non-English text unless asked; transcribe it as written and, if the language or script is apparent, name it.
 
 Braille is named, not transcribed. When braille is visible, say that it is braille and where it is, such as "a sign in print and braille" or "a braille panel below the printed label." Do not decode, transcribe, or translate braille, and do not comment on whether it can be read. Call it braille: do not describe it as dots, raised dots, tactile dots, or "raised braille dots."
 
@@ -294,6 +298,7 @@ Before answering, privately verify that the description:
 * includes relevant color, scale, and relationships;
 * transcribes every piece of visible text word for word, without summarizing any of it;
 * names braille as braille, without decoding it or calling it raised dots;
+* neither guesses at nor reports incidental writing that cannot be read;
 * describes people consistently, equitably, and without unsupported identity assumptions;
 * opens with the subject and what is happening, not with the medium, the camera angle, the frame, or the setting;
 * leaves what the setting and background look like for the end;
