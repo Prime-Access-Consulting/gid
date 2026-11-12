@@ -199,6 +199,7 @@ class Config:
                 "Additional image facts provided by the user (treat as true and naturally incorporate that "
                 "knowledge if helpful or necessary to inform the description): {context}"
             ),
+            "orientation_template": "Frame orientation, measured from the image file: {orientation}.",
             "format_retry_prompt": (
                 "Your previous response was rejected because it {problems}. The rejected response was:\n\n"
                 "{previous_response}\n\n"
@@ -238,10 +239,11 @@ class Config:
         "single_image_prompt",
         "composite_image_prompt",
         "context_template",
+        "orientation_template",
         "format_retry_prompt",
         "short_retry_prompt"
     )
-    
+
     CONFIG_FILENAME = "config.json"
 
     @staticmethod
@@ -531,6 +533,17 @@ class PreparedImage:
     def data_url(self) -> str:
         """Return the image as a base64 data URL for the Responses API."""
         return f"data:{self.mime_type};base64,{base64.b64encode(self.data).decode('ascii')}"
+
+    def frame_orientation(self) -> str:
+        """
+        Return landscape, portrait, or square for the upright frame, from its pixel size.
+
+        Sides within five percent of each other count as square: no common photo
+        or print format is that close to square without being meant as one.
+        """
+        if abs(self.width - self.height) <= 0.05 * max(self.width, self.height):
+            return "square"
+        return "landscape" if self.width > self.height else "portrait"
 
 
 @dataclass
@@ -1058,7 +1071,8 @@ class ImageDescriber:
         format_retry_prompt: Optional[str] = None,
         short_retry_prompt: Optional[str] = None,
         short_description_max_words: Optional[int] = None,
-        max_image_megapixels: float = DEFAULT_MAX_IMAGE_MEGAPIXELS
+        max_image_megapixels: float = DEFAULT_MAX_IMAGE_MEGAPIXELS,
+        orientation_template: Optional[str] = None
     ):
         if OpenAI is None:
             raise ImportError(
@@ -1108,6 +1122,7 @@ class ImageDescriber:
         self.single_image_prompt = single_image_prompt
         self.composite_image_prompt = composite_image_prompt
         self.context_template = context_template
+        self.orientation_template = orientation_template or ""
         self.format_retry_prompt = format_retry_prompt
         self.short_retry_prompt = short_retry_prompt
 
@@ -1343,6 +1358,29 @@ class ImageDescriber:
             context_text = f"{rendered_template} {context_value}".strip() if rendered_template else context_value
         return f"{instructions.strip()}\n\n{context_text}"
 
+    def _orientation_note(self, orientations: List[str]) -> str:
+        """
+        Return the request line that states each frame's orientation, or "" when disabled.
+
+        The orientation is measured from the pixels because the model cannot be
+        trusted to judge it: it has called portrait frames landscape and upright
+        photos sideways.
+        """
+        if not self.orientation_template.strip() or not orientations:
+            return ""
+        if len(orientations) == 1:
+            value = orientations[0]
+        else:
+            value = ", ".join(
+                f"image {index} {orientation}"
+                for index, orientation in enumerate(orientations, start=1)
+            )
+        return render_prompt_template(
+            self.orientation_template,
+            self.short_description_max_words,
+            extra={"orientation": value}
+        )
+
     def _base_response_params(self) -> Dict[str, Any]:
         """Return the model, token, temperature, and reasoning parameters shared by every call."""
         params: Dict[str, Any] = {
@@ -1476,20 +1514,24 @@ class ImageDescriber:
         label = ", ".join(os.path.basename(path) for path in image_paths)
         try:
             prompt_text = self.composite_image_prompt if len(image_paths) > 1 else self.single_image_prompt
-            content: List[Dict[str, str]] = [{
-                "type": "input_text",
-                "text": render_prompt_template(prompt_text, self.short_description_max_words)
-            }]
+            images: List[Dict[str, str]] = []
+            orientations: List[str] = []
             for image_path in image_paths:
                 prepared = FileHelper.prepare_image(image_path, self.max_image_megapixels)
                 if prepared.changes:
                     upload_logger.info(
                         f"{os.path.basename(image_path)}: {', '.join(prepared.changes)} for upload."
                     )
-                content.append({
+                orientations.append(prepared.frame_orientation())
+                images.append({
                     "type": "input_image",
                     "image_url": prepared.data_url()
                 })
+            request_text = render_prompt_template(prompt_text, self.short_description_max_words)
+            orientation_note = self._orientation_note(orientations)
+            if orientation_note:
+                request_text = f"{request_text}\n\n{orientation_note}"
+            content: List[Dict[str, str]] = [{"type": "input_text", "text": request_text}] + images
 
             response_params = self._base_response_params()
             response_params["input"] = [{"role": "user", "content": content}]
@@ -1574,6 +1616,7 @@ class ImageProcessor:
         self.single_image_prompt = prompt_config.get("single_image_prompt")
         self.composite_image_prompt = prompt_config.get("composite_image_prompt")
         self.context_template = prompt_config.get("context_template")
+        self.orientation_template = prompt_config.get("orientation_template")
         self.format_retry_prompt = prompt_config.get("format_retry_prompt")
         self.short_retry_prompt = prompt_config.get("short_retry_prompt")
         self.short_description_max_words = prompt_config.get("short_description_max_words")
@@ -1598,7 +1641,8 @@ class ImageProcessor:
                 format_retry_prompt=self.format_retry_prompt,
                 short_retry_prompt=self.short_retry_prompt,
                 short_description_max_words=self.short_description_max_words,
-                max_image_megapixels=self.max_image_megapixels
+                max_image_megapixels=self.max_image_megapixels,
+                orientation_template=self.orientation_template
             )
         self.progress_lock = Lock()
 
@@ -2430,7 +2474,8 @@ class CLI:
             format_retry_prompt=config["prompt"]["format_retry_prompt"],
             short_retry_prompt=config["prompt"]["short_retry_prompt"],
             short_description_max_words=config["prompt"]["short_description_max_words"],
-            max_image_megapixels=config["processing"].get("max_image_megapixels", DEFAULT_MAX_IMAGE_MEGAPIXELS)
+            max_image_megapixels=config["processing"].get("max_image_megapixels", DEFAULT_MAX_IMAGE_MEGAPIXELS),
+            orientation_template=config["prompt"].get("orientation_template")
         )
 
         short_desc, long_desc = describer.describe_image(image_path)

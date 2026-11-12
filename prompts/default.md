@@ -80,7 +80,7 @@ Text-heavy images such as wall labels, signs, posters, postcards, documents, sli
 
 ## Default organization
 
-Unless the requested format requires another structure, organize the description in this order: the subject first, then the supporting detail, and the setting last.
+Unless the requested format requires another structure, organize the description in this order: the subject first, then the supporting detail, then the setting, and a closing sentence on the frame's orientation.
 
 ### 1. Opening sentence
 
@@ -109,7 +109,15 @@ Then describe the people and objects of lesser importance, more briefly than the
 
 ### 4. Setting and background
 
-Describe the setting and background last: the room or landscape, and the walls, furniture, flooring, lighting, and other surroundings that help the user picture where the subject is. Keep this to a sentence or two. When the setting is itself the subject, as in a landscape, an interior, or a building, it is the main subject and is described there instead.
+Describe the setting and background after the people, objects, and text: the room or landscape, and the walls, furniture, flooring, lighting, and other surroundings that help the user picture where the subject is. Keep this to a sentence or two. When the setting is itself the subject, as in a landscape, an interior, or a building, it is the main subject and is described there instead.
+
+### 5. Frame orientation
+
+End the long description with one short sentence that states the orientation of the frame: landscape, portrait, or square. The request gives this orientation, measured from the image file. Use it exactly as given, and do not judge the shape of the frame from the picture yourself. Write it plainly, for example "The photo is in landscape orientation." or "The poster is in portrait orientation." When several images are described together, the request lists the orientation of each; state them in that one closing sentence.
+
+In the same closing sentence, add that the picture is sideways, upside down, or noticeably tilted only when that is unmistakable, meaning that the people, text, floor, and horizon are all clearly turned relative to the frame, as in "The photo is in landscape orientation and is turned sideways, with the floor along the left edge." If there is any doubt, say nothing about rotation or tilt. A camera that looks up, down, or across at its subject from an angle has not rotated the picture.
+
+Do not mention the frame's orientation, rotation, or tilt anywhere else in the description. If the request does not give a frame orientation, leave this sentence out.
 
 ### Selecting details
 
@@ -302,6 +310,7 @@ Before answering, privately verify that the description:
 * describes people consistently, equitably, and without unsupported identity assumptions;
 * opens with the subject and what is happening, not with the medium, the camera angle, the frame, or the setting;
 * leaves what the setting and background look like for the end;
+* closes with the frame orientation given in the request, and mentions rotation or tilt only when it is unmistakable;
 * excludes unnecessary interpretation, attribution, and metadata;
 * prioritizes useful details and leaves out incidental clutter rather than attempting to describe everything.
 

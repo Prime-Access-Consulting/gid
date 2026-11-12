@@ -254,6 +254,7 @@ The config file is strict JSON. Comments are not allowed in the file itself.
     "single_image_prompt": "Describe the following image using the required SHORT/LONG output format.",
     "composite_image_prompt": "Describe the following images together as a single composite using the required SHORT/LONG output format.",
     "context_template": "Additional image facts provided by the user (treat as true and naturally incorporate that knowledge if helpful or necessary to inform the description): {context}",
+    "orientation_template": "Frame orientation, measured from the image file: {orientation}.",
     "format_retry_prompt": "Your previous response was rejected because it {problems}. The rejected response was:\n\n{previous_response}\n\nDescribe the image or images again, following the required SHORT/LONG output format exactly.",
     "short_retry_prompt": "The short description below was rejected because it {problems}. Rewrite it as a complete, self-contained phrase of no more than {short_description_max_words} words that names the main subject. Keep the original meaning, and use the long description only to decide what matters most. Do not use quotation marks of any kind or the characters \\ / : * ? \" < > |. Do not end with punctuation, an article, a preposition, a conjunction, or a possessive. Reply with exactly one line in the form: SHORT: <short description>\n\nRejected short description: {short_description}\n\nLong description: {long_description}",
     "short_description_max_words": 10
@@ -276,6 +277,7 @@ Key settings:
 | `processing.max_image_megapixels` | Images with more pixels than this are resampled down to it before upload; see Image Preparation. Must be greater than 0. |
 | `output.output_folder_name` | Folder used for copied output and the workbook when copying is enabled. |
 | `output.workbook_filename` | Workbook filename. A legacy `.tsv` with the same stem is imported once when no workbook exists. |
+| `prompt.orientation_template` | Added to each request to state the frame's orientation (`landscape`, `portrait`, or `square`) as measured from the image file. Placeholder: `{orientation}`. Set to `""` to send nothing. |
 | `prompt.format_retry_prompt` | Sent with the images, once, when a response breaks the SHORT/LONG layout. Placeholders: `{problems}`, `{previous_response}`. |
 | `prompt.short_retry_prompt` | Sent text-only, up to twice, when the short description is too long or ends mid-phrase. Placeholders: `{problems}`, `{short_description}`, `{long_description}`. |
 | `prompt.short_description_max_words` | Maximum words in the short description. Never enforced by truncation; see Prompt Behavior. |
@@ -313,7 +315,7 @@ As with config files, the current working directory is not searched.
 
 `--prompt NAME` overrides `prompt.system_prompt` with one of those prompt files. `prompt.instructions_prompt` is placed before the selected system prompt so reusable output-format instructions stay prominent across prompt variants.
 
-Use `{context}` in `context_template`; it is replaced with the row's `Context` value. Use `{short_description_max_words}` in prompt text when referring to the configured short-description length. The retry prompts take `{problems}` plus `{previous_response}` for `format_retry_prompt`, or `{short_description}` and `{long_description}` for `short_retry_prompt`.
+Use `{context}` in `context_template`; it is replaced with the row's `Context` value. Use `{orientation}` in `orientation_template`. Use `{short_description_max_words}` in prompt text when referring to the configured short-description length. The retry prompts take `{problems}` plus `{previous_response}` for `format_retry_prompt`, or `{short_description}` and `{long_description}` for `short_retry_prompt`.
 
 The bundled instructions prompt asks the model to return two labeled fields:
 
@@ -327,6 +329,8 @@ GID strips these labels when saving to the workbook. Long descriptions are saved
 The short description is never truncated. If the model returns more than `short_description_max_words` words, or a phrase that ends mid-thought (for example on "with", a possessive, or an unclosed quotation mark), GID sends a small text-only follow-up asking the model to rewrite it, up to two times, and reports an error for that image if it still cannot get a valid one. If a response does not use the SHORT/LONG layout at all, GID resends the images once together with the rejected response and the reason.
 
 The bundled default prompt requires every piece of visible text in an image to be transcribed word for word in the long description, including labels, credit lines, and fine print. Text is never summarized.
+
+GID measures each frame's orientation from the image file and states it in the request through `prompt.orientation_template`. The bundled default prompt closes the long description with it, for example "The photo is in landscape orientation." The model is told to use the measured value rather than judge the frame itself, and to add that a picture is sideways, upside down, or tilted only when that is unmistakable, because its own sense of orientation is unreliable. For composites, the request lists the orientation of each image in order.
 
 ## Output Format
 
