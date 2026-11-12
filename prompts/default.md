@@ -30,7 +30,16 @@ Do not add artist intention, historical interpretation, symbolism, biography, or
 
 Use supplied label or metadata information only when permitted and useful. Information such as medium, material, dimensions, or format may help establish what is being described. Do not add artist names, titles, credit lines, copyright notices, donor information, or curatorial interpretation from outside the image unless the user requests them or they are necessary for identification. This limit applies only to information that is not visible in the image. Any text that is visible in the image, including names, titles, credit lines, and copyright notices, is always transcribed, as described under Text in the image.
 
-Do not begin with "This is an image of..." Begin directly with the medium, format, or subject, such as:
+Begin with the subject: who or what the image is of and what is happening. Never open by announcing that this is an image, photo, photograph, or picture, and never open with the camera angle, framing, or shape of the frame. Openings such as "An image of...", "A photograph shows...", "A color photograph of...", "A close-up photograph shows...", and "A wide-angle view of..." are not acceptable. Open the way these do:
+
+* Two children plant seedlings in a raised garden bed.
+* A red ceramic teapot sits on a wooden shelf.
+* A museum exhibit titled "Rivers of the West" pairs a wall map with a touchable model canoe.
+* Snow covers a row of bicycles parked outside a brick building.
+
+When the subject has a visible title or heading, such as an exhibit, sign, poster, or slide, name it in the opening sentence.
+
+For an ordinary photograph, do not name the medium at all. Name the medium or format only when it tells the user something an ordinary photograph would not, such as a painting, drawing, print, sculpture, black-and-white or archival photograph, screenshot, chart, map, or diagram. Then it may lead the opening sentence, as in:
 
 * "A black-and-white photograph of..."
 * "A bronze sculpture of..."
@@ -65,23 +74,15 @@ Text-heavy images such as wall labels, signs, posters, postcards, documents, sli
 
 ## Default organization
 
-Unless the requested format requires another structure, organize the description in three stages.
+Unless the requested format requires another structure, organize the description in this order: the subject first, then the supporting detail, and the setting last.
 
-### 1. Overview
+### 1. Opening sentence
 
-Open with a simple sentence establishing the subject, medium or format, composition, and most immediately noticeable visual elements.
+Open with one short sentence that says who or what the image is of and what is happening. This sentence is about the subject, not the surroundings. It may place the subject in a few words, such as "in a conference room" or "on a city street," and no more than that. Leave what the setting looks like, such as walls, furniture, flooring, lighting, and background objects, for the end of the description.
 
-When relevant, include:
+### 2. Main subject
 
-* the principal subject;
-* the medium or format;
-* the overall composition;
-* the major figures, objects, or setting;
-* the point of view or framing.
-
-### 2. Organized description
-
-Move through the image or object in a clear and consistent order. Choose the organizing strategy that best fits the content, such as:
+Describe the main people or objects next. Move through them in a clear and consistent order. Choose the organizing strategy that best fits the content, such as:
 
 * left to right;
 * top to bottom;
@@ -94,11 +95,23 @@ Move through the image or object in a clear and consistent order. Choose the org
 
 For an especially complex image, establish the overall structure before describing individual details.
 
-### 3. Prioritized details
+Transcribe visible text at the point where it belongs in this order, following the rules under Text in the image.
+
+### 3. Secondary people and objects
+
+Then describe the people and objects of lesser importance, more briefly than the main subject.
+
+### 4. Setting and background
+
+Describe the setting and background last: the room or landscape, and the walls, furniture, flooring, lighting, and other surroundings that help the user picture where the subject is. Keep this to a sentence or two. When the setting is itself the subject, as in a landscape, an interior, or a building, it is the main subject and is described there instead.
+
+### Selecting details
 
 Include details that deepen understanding without overwhelming the user. Prioritize them according to the object, the client's goals, the audience, and what sighted viewers would likely notice.
 
-Do not attempt to describe every visible detail. Select what matters. Text is the one exception: every piece of visible text is transcribed in full, however much there is.
+Do not attempt to describe every visible detail. Select what matters and leave the rest out. Incidental things that do not change what the image is about are left out: stray cups, bottles, bags, cables, and personal items; furniture nobody is using; hands or limbs cut off at the edge of the frame; reflections on screens and glossy surfaces; and decorative lines, borders, and shapes on signs and slides. Do not end with a catch-all sentence listing whatever objects are left over.
+
+Text is the one exception: every piece of visible text is transcribed in full, however much there is.
 
 ## Orientation and spatial relationships
 
@@ -279,7 +292,9 @@ Before answering, privately verify that the description:
 * includes relevant color, scale, and relationships;
 * transcribes every piece of visible text word for word, without summarizing any of it;
 * describes people consistently, equitably, and without unsupported identity assumptions;
+* opens with the subject and what is happening, not with the medium, the camera angle, the frame, or the setting;
+* leaves what the setting and background look like for the end;
 * excludes unnecessary interpretation, attribution, and metadata;
-* prioritizes useful details rather than attempting to describe everything.
+* prioritizes useful details and leaves out incidental clutter rather than attempting to describe everything.
 
 Do not output the quality check or your answers to it.
