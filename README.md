@@ -13,6 +13,7 @@ GID is a Python CLI for generating short, filename-friendly image descriptions a
 - Optionally copies described images into a `Described/` folder using sanitized short descriptions as filenames.
 - Can skip copying with `--no-copy` and keep all output in the source folder.
 - Transcribes every piece of visible text word for word in the long description, and never truncates short descriptions: an over-long or mid-phrase short description is sent back to the model for a rewrite.
+- Resamples oversized photos down to a size the model reads accurately before upload, always as a whole frame: images are never cropped or split into parts, and the files on disk are never changed.
 - Supports prompt files, custom config files, model overrides, reasoning controls, and temperature/max-token settings.
 - Supports optional composite detection for filename sequences such as `base_1.jpg`, `base_2.jpg`, `base_3.jpg`.
 
@@ -240,6 +241,7 @@ The config file is strict JSON. Comments are not allowed in the file itself.
     "no_copy": false,
     "no_composites": true,
     "max_workers": 0,
+    "max_image_megapixels": 10.0,
     "verbose": false
   },
   "output": {
@@ -271,6 +273,7 @@ Key settings:
 | `processing.no_copy` | `true` writes the workbook in the source folder instead of `Described/` and copies nothing. |
 | `processing.no_composites` | `true` disables automatic composite detection. |
 | `processing.max_workers` | Maximum worker threads in folder mode; `0` means auto. |
+| `processing.max_image_megapixels` | Images with more pixels than this are resampled down to it before upload; see Image Preparation. Must be greater than 0. |
 | `output.output_folder_name` | Folder used for copied output and the workbook when copying is enabled. |
 | `output.workbook_filename` | Workbook filename. A legacy `.tsv` with the same stem is imported once when no workbook exists. |
 | `prompt.format_retry_prompt` | Sent with the images, once, when a response breaks the SHORT/LONG layout. Placeholders: `{problems}`, `{previous_response}`. |
@@ -282,6 +285,18 @@ Regenerate the sample config from built-in defaults:
 ```bash
 python3 gid.py --write-sample-config
 ```
+
+## Image Preparation
+
+GID sends each image to the model as a whole frame. Most files are uploaded exactly as they are on disk. A file is redrawn in memory first, without touching the original, in three cases:
+
+- **It is larger than `processing.max_image_megapixels` (default `10`).** The API passes large images through at full size, and above roughly 12 megapixels `gpt-5.6` starts to misplace and double-count what is in the frame and to call upright photos sideways or upside down. Fine print reads best near 10 megapixels, so larger images are resampled down to that size. A 24-megapixel phone photo (5712 x 4284) is sent at 3651 x 2738.
+- **The camera stored it turned.** Phone photos held upright are usually stored sideways with an EXIF rotation note. GID turns the pixels upright itself rather than relying on the API to read the note.
+- **The format is not one the API accepts.** BMP and TIFF files are converted, and an animated image is sent as a still of its first frame.
+
+Resampling keeps the frame's proportions: an image is never cropped, never split into parts, and never enlarged. Photos are re-encoded as high-quality JPEG; PNG and GIF graphics and anything with transparency stay lossless PNG. The megapixel limit is about pixel count, not file size: a 4 MB JPEG can still be a 24-megapixel image.
+
+SHA-1 hashes are always computed from the original file, so preparing an image for upload never changes which rows are skipped or regenerated. Run with `--verbose` to log how each file was prepared.
 
 ## Prompt Behavior
 

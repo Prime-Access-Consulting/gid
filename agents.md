@@ -6,7 +6,7 @@ Generate short and long textual descriptions for images using the OpenAI API. Th
 ## Repository Layout
 - `gid.py`: single entry point, all logic lives here
 - `config.json.sample`: sample config (copy to `config.json` to override defaults)
-- `requirements.txt`: depends on `openai>=1.0.0` and `openpyxl>=3.1.2` (the workbook store)
+- `requirements.txt`: depends on `openai>=1.0.0`, `openpyxl>=3.1.2` (the workbook store), and `Pillow>=9.1.0` (image preparation before upload)
 - `README.md`: user-facing docs
 
 ## Run Commands
@@ -66,11 +66,11 @@ python3 gid.py /path/to/images --verbose
 - `--write-sample-config [PATH]`: write built-in defaults to a sample config file and exit (default `config.json.sample`)
 - `-n`, `--no-copy`: skip copying in folder mode
 - `-w`, `--workers`: max worker threads in folder mode (`0` = auto)
-- `-v`, `--verbose`: enable OpenAI + HTTPX request logs
+- `-v`, `--verbose`: enable OpenAI + HTTPX request logs and per-image notes on how each file was prepared for upload
 - `-c`, `--config`: path to config file
 
 ## Configuration Resolution
-1. Start from `Config.DEFAULT_CONFIG` in `gid.py`, which defines the real defaults (model `gpt-5.6`; temperature `1.0`; max tokens `4000`; reasoning effort `medium`; composites disabled; max workers `0`; prompt defaults).
+1. Start from `Config.DEFAULT_CONFIG` in `gid.py`, which defines the real defaults (model `gpt-5.6`; temperature `1.0`; max tokens `4000`; reasoning effort `medium`; composites disabled; max workers `0`; max image megapixels `10`; prompt defaults).
 2. If a user config file exists, deep-merge it over the code defaults. The first match wins:
    - `--config` path, else `config.json` in the folder being described (for a single image, its folder), else `config.json` next to `gid.py`, else `~/.config/gid/config.json`
    - The current working directory is never searched
@@ -111,6 +111,13 @@ Prompt fields can be inline prompt text or prompt file references. Bare path-lik
   - Runs folder-mode behavior for each matched folder, respecting other CLI options.
   - Resolves folder-local config and prompt directories per matched folder unless `--config` is supplied.
   - Skips generated `Described` folders, hidden folders, source-control folders, and common environment/cache folders.
+
+## Image Preparation (Important)
+- `FileHelper.prepare_image` decides what is uploaded for each image. Most files go up byte for byte. A file is redrawn in memory (never on disk) when it has more than `processing.max_image_megapixels` pixels (default `10`), when its EXIF orientation says the camera stored it turned, or when its format is not JPEG, PNG, WEBP, or a still GIF.
+- The frame is always sent whole and in proportion. Never crop, tile, or send portions of an image, and never enlarge one.
+- Why 10 megapixels: the API passes large images to `gpt-5.6` at full size (`detail` is left at its default), and above roughly 12 megapixels the model misplaces and double-counts what is in the frame and reports upright photos as sideways or upside down. Layout was right in every test run at 10 megapixels and below, and fine print read best near 10. Re-test before raising it or changing models.
+- Redrawn photos are sent as JPEG (quality 90, no chroma subsampling); PNG and GIF sources and anything with transparency are sent as PNG. The MIME type comes from the file's contents, not its extension. Pillow reports phone multi-picture JPEGs as `MPO`; those are treated as JPEG.
+- SHA-1 hashes come from the original file bytes, so preparation never affects skip or regenerate decisions.
 
 ## OpenAI Call Behavior (Important)
 - Uses the Responses API with `input_image` content and `instructions` for the system prompt.

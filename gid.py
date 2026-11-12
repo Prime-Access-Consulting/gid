@@ -29,6 +29,8 @@ Features:
 import sys
 import os
 import re
+import io
+import math
 import base64
 import shutil
 import hashlib
@@ -42,12 +44,23 @@ from pathlib import Path
 from typing import Tuple, List, Dict, Optional, Any, Set
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from threading import Lock
+from threading import Lock, BoundedSemaphore
 
 try:
     from openai import OpenAI
 except ImportError:
     OpenAI = None
+
+try:
+    from PIL import Image, ImageOps
+except ImportError:
+    Image = None
+    ImageOps = None
+
+if Image is not None:
+    # GID only opens the user's own local files, and museum scans can be very large,
+    # so Pillow's decompression-bomb guard would only get in the way.
+    Image.MAX_IMAGE_PIXELS = None
 
 # Configure logging - simple output with just the message
 logging.basicConfig(
@@ -60,8 +73,33 @@ logger = logging.getLogger('gid')
 logging.getLogger("openai").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
+# Per-image notes about how a file was prepared for upload; shown with --verbose.
+upload_logger = logging.getLogger("gid.upload")
+upload_logger.setLevel(logging.WARNING)
+
 # Valid image extensions
 VALID_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp")
+
+# Formats the Responses API accepts as they are, keyed by Pillow's format name.
+# MPO is the multi-picture JPEG that phone cameras write; its bytes are a valid JPEG.
+# Anything else (BMP, TIFF) is converted before upload.
+API_IMAGE_MIME_TYPES = {
+    "JPEG": "image/jpeg",
+    "MPO": "image/jpeg",
+    "PNG": "image/png",
+    "WEBP": "image/webp",
+    "GIF": "image/gif"
+}
+# Formats that can hold several frames, of which the API reads only a still.
+MULTI_FRAME_FORMATS = ("GIF", "WEBP", "PNG")
+# EXIF orientation values that turn the frame a quarter turn, swapping width and height.
+EXIF_ORIENTATION_TAG = 0x0112
+EXIF_QUARTER_TURN_ORIENTATIONS = (5, 6, 7, 8)
+# Largest image sent to the model, in megapixels. Bigger images are resampled down to
+# this size as a whole frame. See FileHelper.prepare_image for why.
+DEFAULT_MAX_IMAGE_MEGAPIXELS = 10.0
+# Only this many images are decoded and redrawn at once, to bound memory in large batches.
+IMAGE_REDRAW_SLOTS = BoundedSemaphore(2)
 
 DEFAULT_MODEL = "gpt-5.6"
 REASONING_EFFORT_VALUES = ("none", "low", "medium", "high", "xhigh")
@@ -142,6 +180,7 @@ class Config:
             "no_copy": False,
             "no_composites": True,
             "max_workers": 0,
+            "max_image_megapixels": DEFAULT_MAX_IMAGE_MEGAPIXELS,
             "verbose": False
         },
         "output": {
@@ -470,6 +509,29 @@ class Config:
             raise ValueError("processing.max_workers must be 0 for auto or at least 1.")
         return None if max_workers == 0 else max_workers
 
+    @staticmethod
+    def normalize_max_image_megapixels(max_megapixels: Any) -> float:
+        """Validate the size, in megapixels, above which images are resampled down before upload."""
+        if isinstance(max_megapixels, bool) or not isinstance(max_megapixels, (int, float)):
+            raise ValueError("processing.max_image_megapixels must be a number.")
+        if max_megapixels <= 0:
+            raise ValueError("processing.max_image_megapixels must be greater than 0.")
+        return float(max_megapixels)
+
+
+@dataclass
+class PreparedImage:
+    """An image as it is uploaded: the bytes, their type, and the size of the upright frame."""
+    data: bytes
+    mime_type: str
+    width: int
+    height: int
+    changes: List[str]
+
+    def data_url(self) -> str:
+        """Return the image as a base64 data URL for the Responses API."""
+        return f"data:{self.mime_type};base64,{base64.b64encode(self.data).decode('ascii')}"
+
 
 @dataclass
 class ImageResult:
@@ -517,13 +579,90 @@ class FileHelper:
         return sha1.hexdigest()
     
     @staticmethod
-    def encode_image(image_path: str) -> str:
+    def prepare_image(image_path: str, max_megapixels: float) -> PreparedImage:
         """
-        Encode the given image file into base64.
+        Return the image as it should be uploaded.
+
+        The file's own bytes are sent when the model can take them as they are.
+        Otherwise the whole frame is redrawn, for any of three reasons:
+
+        - It has more pixels than the model reads reliably. The API passes a
+          large image through at full size, and in testing with gpt-5.6, frames
+          above about twelve megapixels came back with people and objects
+          misplaced or counted twice, and with upright photos reported as
+          sideways or upside down. Fine print read best near ten megapixels, so
+          larger images are resampled down to max_megapixels.
+        - The camera stored it turned and left a rotation note in the EXIF data.
+          The API has honored that note in testing, but a redrawn file no
+          longer carries it and GID should not depend on it, so the pixels
+          themselves are turned upright.
+        - The format is one the API does not accept, or it has several frames.
+
+        The frame is always kept whole and in proportion: it is never cropped,
+        never split into parts, and never enlarged.
         """
-        with open(image_path, "rb") as image_file:
-            return base64.b64encode(image_file.read()).decode("utf-8")
-    
+        if Image is None or ImageOps is None:
+            raise ImportError(
+                "The Pillow package is required to prepare images for upload. "
+                "Install it with: pip install Pillow"
+            )
+        with Image.open(image_path) as img:
+            source_format = (img.format or "").upper()
+            stored_width, stored_height = img.size
+            exif_orientation = img.getexif().get(EXIF_ORIENTATION_TAG, 1)
+            turned = exif_orientation in range(2, 9)
+            if exif_orientation in EXIF_QUARTER_TURN_ORIENTATIONS:
+                width, height = stored_height, stored_width
+            else:
+                width, height = stored_width, stored_height
+
+            scale = min(1.0, math.sqrt(max_megapixels * 1_000_000 / (width * height)))
+            target_width = max(1, int(width * scale))
+            target_height = max(1, int(height * scale))
+            multi_frame = source_format in MULTI_FRAME_FORMATS and getattr(img, "is_animated", False)
+
+            changes: List[str] = []
+            if scale < 1.0:
+                changes.append(f"resampled from {width} x {height} to {target_width} x {target_height}")
+            if turned:
+                changes.append("turned upright")
+            if source_format not in API_IMAGE_MIME_TYPES:
+                changes.append(f"converted from {source_format or 'an unrecognized format'}")
+            elif multi_frame:
+                changes.append("reduced to its first frame")
+
+            if not changes:
+                with open(image_path, "rb") as image_file:
+                    data = image_file.read()
+                return PreparedImage(data, API_IMAGE_MIME_TYPES[source_format], width, height, changes)
+
+            with IMAGE_REDRAW_SLOTS:
+                if scale < 1.0 and source_format in ("JPEG", "MPO"):
+                    # Let the JPEG decoder skip detail that the resample would discard anyway.
+                    draft_scale = scale * 2
+                    img.draft(None, (int(stored_width * draft_scale), int(stored_height * draft_scale)))
+                keep_profile = img.mode in ("RGB", "RGBA")
+                icc_profile = img.info.get("icc_profile") if keep_profile else None
+                frame = ImageOps.exif_transpose(img)
+                has_alpha = frame.mode in ("RGBA", "LA", "PA") or "transparency" in frame.info
+                if frame.mode == "I" or frame.mode.startswith("I;16"):
+                    # Deep grayscale scans: bring 16-bit values into the 8-bit range before converting.
+                    frame = frame.convert("I").point(lambda value: value * (1 / 256)).convert("L")
+                frame = frame.convert("RGBA" if has_alpha else "RGB")
+                if frame.size != (target_width, target_height):
+                    frame = frame.resize((target_width, target_height), Image.LANCZOS)
+
+                buffer = io.BytesIO()
+                save_options: Dict[str, Any] = {"icc_profile": icc_profile} if icc_profile else {}
+                if has_alpha or source_format in ("PNG", "GIF"):
+                    # Graphics and screenshots stay lossless so small text keeps its edges.
+                    frame.save(buffer, "PNG", **save_options)
+                    mime_type = "image/png"
+                else:
+                    frame.save(buffer, "JPEG", quality=90, subsampling=0, **save_options)
+                    mime_type = "image/jpeg"
+            return PreparedImage(buffer.getvalue(), mime_type, target_width, target_height, changes)
+
     @staticmethod
     def sanitize_filename(name: str) -> str:
         """
@@ -918,13 +1057,20 @@ class ImageDescriber:
         context_template: Optional[str] = None,
         format_retry_prompt: Optional[str] = None,
         short_retry_prompt: Optional[str] = None,
-        short_description_max_words: Optional[int] = None
+        short_description_max_words: Optional[int] = None,
+        max_image_megapixels: float = DEFAULT_MAX_IMAGE_MEGAPIXELS
     ):
         if OpenAI is None:
             raise ImportError(
                 "The openai package is required for image description. "
                 "Install it with: pip install openai"
             )
+        if Image is None:
+            raise ImportError(
+                "The Pillow package is required to prepare images for upload. "
+                "Install it with: pip install Pillow"
+            )
+        self.max_image_megapixels = Config.normalize_max_image_megapixels(max_image_megapixels)
         self.api_key = api_key
         self.model = Config.normalize_model_name(model)
         self.temperature = temperature
@@ -1335,11 +1481,14 @@ class ImageDescriber:
                 "text": render_prompt_template(prompt_text, self.short_description_max_words)
             }]
             for image_path in image_paths:
-                encoded_image = FileHelper.encode_image(image_path)
-                extension = os.path.splitext(image_path)[1][1:].lower()
+                prepared = FileHelper.prepare_image(image_path, self.max_image_megapixels)
+                if prepared.changes:
+                    upload_logger.info(
+                        f"{os.path.basename(image_path)}: {', '.join(prepared.changes)} for upload."
+                    )
                 content.append({
                     "type": "input_image",
-                    "image_url": f"data:image/{extension};base64,{encoded_image}"
+                    "image_url": prepared.data_url()
                 })
 
             response_params = self._base_response_params()
@@ -1409,6 +1558,9 @@ class ImageProcessor:
         self.no_copy = config["processing"]["no_copy"]
         self.no_composites = config["processing"].get("no_composites", True)
         self.max_workers = Config.normalize_max_workers(config["processing"]["max_workers"])
+        self.max_image_megapixels = Config.normalize_max_image_megapixels(
+            config["processing"].get("max_image_megapixels", DEFAULT_MAX_IMAGE_MEGAPIXELS)
+        )
         self.verbose = config["processing"]["verbose"]
         self.output_folder_name = config["output"]["output_folder_name"]
         self.workbook_filename = config["output"]["workbook_filename"]
@@ -1445,15 +1597,17 @@ class ImageProcessor:
                 context_template=self.context_template,
                 format_retry_prompt=self.format_retry_prompt,
                 short_retry_prompt=self.short_retry_prompt,
-                short_description_max_words=self.short_description_max_words
+                short_description_max_words=self.short_description_max_words,
+                max_image_megapixels=self.max_image_megapixels
             )
         self.progress_lock = Lock()
-        
+
         # Set up logging based on verbosity
         if self.verbose:
-            # Enable HTTP request logging in verbose mode
+            # Enable HTTP request logging and per-image upload notes in verbose mode
             logging.getLogger("openai").setLevel(logging.INFO)
             logging.getLogger("httpx").setLevel(logging.INFO)
+            upload_logger.setLevel(logging.INFO)
 
     def entry_needs_description(self, entry: DescriptionRow) -> bool:
         """Return True when a stored row is missing or has unusable descriptions, logging why."""
@@ -2243,6 +2397,9 @@ class CLI:
                 config["parameters"].get("reasoning_effort")
             )
             Config.normalize_max_workers(config["processing"].get("max_workers"))
+            config["processing"]["max_image_megapixels"] = Config.normalize_max_image_megapixels(
+                config["processing"].get("max_image_megapixels", DEFAULT_MAX_IMAGE_MEGAPIXELS)
+            )
         except (FileNotFoundError, ValueError) as e:
             print(f"Error: {str(e)}", file=sys.stderr)
             sys.exit(1)
@@ -2254,10 +2411,11 @@ class CLI:
         """Process a single image file and output descriptions directly."""
         Config.validate_prompt_config(config)
         if config["processing"]["verbose"]:
-            # Enable HTTP request logging in verbose mode
+            # Enable HTTP request logging and per-image upload notes in verbose mode
             logging.getLogger("openai").setLevel(logging.INFO)
             logging.getLogger("httpx").setLevel(logging.INFO)
-            
+            upload_logger.setLevel(logging.INFO)
+
         describer = ImageDescriber(
             api_key=config["api"]["api_key"],
             model=config["api"]["model"],
@@ -2271,9 +2429,10 @@ class CLI:
             context_template=config["prompt"]["context_template"],
             format_retry_prompt=config["prompt"]["format_retry_prompt"],
             short_retry_prompt=config["prompt"]["short_retry_prompt"],
-            short_description_max_words=config["prompt"]["short_description_max_words"]
+            short_description_max_words=config["prompt"]["short_description_max_words"],
+            max_image_megapixels=config["processing"].get("max_image_megapixels", DEFAULT_MAX_IMAGE_MEGAPIXELS)
         )
-        
+
         short_desc, long_desc = describer.describe_image(image_path)
         
         if short_desc == "Error":

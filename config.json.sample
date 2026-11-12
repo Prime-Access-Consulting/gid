@@ -12,6 +12,7 @@
     "no_copy": false,
     "no_composites": true,
     "max_workers": 0,
+    "max_image_megapixels": 10.0,
     "verbose": false
   },
   "output": {
