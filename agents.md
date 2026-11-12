@@ -128,7 +128,8 @@ Prompt fields can be inline prompt text or prompt file references. Bare path-lik
 - Composite rows use `prompt.composite_image_prompt` from config.
 - Short descriptions are validated against `short_description_max_words` (default 10) and never truncated. An over-long short, or one that ends mid-phrase, triggers up to two text-only rewrite requests built from `prompt.short_retry_prompt`; if the model still cannot comply, the image is reported as an error and left for the next run.
 - A response that breaks the SHORT/LONG layout is resent once with the images plus `prompt.format_retry_prompt`, which quotes the rejected response and the reason.
-- The bundled default prompt mandates verbatim transcription of all visible text, including labels, credit lines, and fine print; text is never summarized.
+- The bundled default prompt mandates verbatim transcription of all visible text, including labels, credit lines, and fine print; text is never summarized. Braille is the one exception: it is named ("a sign in print and braille"), never decoded, and never called raised dots. Incidental writing that cannot be read with confidence is left out without comment; illegibility is noted only for text the image is about.
+- The bundled default prompt opens the long description with the subject and what is happening (never "A photograph shows...", the camera angle, or the frame), names the medium only for non-photographs, describes setting and background last, and leaves out incidental clutter. These rules came from reviewer edits; check a reviewer's before-and-after workbooks before loosening them.
 - The bundled instructions prompt instructs the model to output:
   - `SHORT: ...` on line 1
   - `LONG: ...` on line 2

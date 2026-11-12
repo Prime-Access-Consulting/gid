@@ -328,7 +328,9 @@ GID strips these labels when saving to the workbook. Long descriptions are saved
 
 The short description is never truncated. If the model returns more than `short_description_max_words` words, or a phrase that ends mid-thought (for example on "with", a possessive, or an unclosed quotation mark), GID sends a small text-only follow-up asking the model to rewrite it, up to two times, and reports an error for that image if it still cannot get a valid one. If a response does not use the SHORT/LONG layout at all, GID resends the images once together with the rejected response and the reason.
 
-The bundled default prompt requires every piece of visible text in an image to be transcribed word for word in the long description, including labels, credit lines, and fine print. Text is never summarized.
+The bundled default prompt requires every piece of visible text in an image to be transcribed word for word in the long description, including labels, credit lines, and fine print. Text is never summarized. Two things are deliberately not transcribed: braille, which is named (for example "a sign in print and braille") but never decoded or described as raised dots, and incidental writing that cannot be read with confidence, such as a signature or tiny background print, which is left out without comment.
+
+Long descriptions open with the subject and what is happening rather than with the medium ("A photograph shows...") or the camera angle. The medium is named only when it is not an ordinary photograph, and the setting and background are described last.
 
 GID measures each frame's orientation from the image file and states it in the request through `prompt.orientation_template`. The bundled default prompt closes the long description with it, for example "The photo is in landscape orientation." The model is told to use the measured value rather than judge the frame itself, and to add that a picture is sideways, upside down, or tilted only when that is unmistakable, because its own sense of orientation is unreliable. For composites, the request lists the orientation of each image in order.
 
